@@ -19,7 +19,7 @@ export class Channel implements Connectable {
 
         // the plugins array holds the plugins configured for this channel
         // their order and connection is manged by the channel they're attached to
-        this.plugins = Array.from({ length: 10 }, () => null);
+        this.plugins = Array.from({ length: 10 }, (): Plugin => null);
 
         // the effect stack for default effects like panning and gain
         // that can be natively applied in the mixer

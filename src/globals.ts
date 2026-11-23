@@ -58,7 +58,6 @@ class Globals {
 
 export var globals = new Globals();
 
-const { WaveFile } = require("wavefile");
 //const wavefile = require("wavefile");
 //const Speaker = require("speaker");
 //const stream = require("stream");

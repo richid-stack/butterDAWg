@@ -1,25 +1,22 @@
-window.addEventListener('DOMContentLoaded', () => {
-    const replaceText = (selector, text) => {
-      const element = document.getElementById(selector)
-      if (element) element.innerText = text
+// Runs in the sandboxed preload context, so it only uses Electron's own
+// modules. It exposes a small read-only file API to the page as window.bridge.
+// The main process (main.js) does the real work and decides what is allowed.
+const { contextBridge, ipcRenderer } = require("electron");
+
+function call(channel, ...args) {
+    const result = ipcRenderer.sendSync(channel, ...args);
+    if (!result.ok) {
+        throw new Error(result.error);
     }
-  
-    for (const dependency of ['chrome', 'node', 'electron']) {
-      replaceText(`${dependency}-version`, process.versions[dependency])
-    }
-})
+    return result.data;
+}
 
-
-// const { contextBridge, ipcRenderer } = require("electron");
-// const { readFileSync, readdirSync, existsSync } = require("fs");
-
-// contextBridge.exposeInMainWorld("electronAPI", {
-//  openWindow: () => ipcRenderer.invoke("test")
-// })
-
-// const fs = {
-//   readFileSync,
-//   readdirSync,
-//   existsSync
-// }
-// contextBridge.exposeInMainWorld("fs", fs);
+contextBridge.exposeInMainWorld("bridge", {
+    appRoot: call("app:root"),
+    fs: {
+        readFile: (path, encoding) => call("fs:readFile", path, encoding),
+        readdir: (path) => call("fs:readdir", path),
+        exists: (path) => call("fs:exists", path),
+        isDirectory: (path) => call("fs:isDirectory", path),
+    },
+});

@@ -2,17 +2,17 @@
     "compilerOptions": {
       "jsx": "react",
       "allowJs": false,
-      "target": "ES5",
-      "lib": ["DOM"],
-      "outDir": "built",
+      "target": "ES2022",
+      "lib": ["DOM", "ES2022"],
+      "types": ["audioworklet", "react"],
+      "paths": { "fs": ["./src/platform/fs.ts"] },
+      "module": "ESNext",
+      "moduleResolution": "Bundler",
+      "noEmit": true,
       "preserveConstEnums": true,
       "strictNullChecks": false,
-      "moduleResolution": "node",
-      "module": "CommonJS",
-      "rootDir": ".",
       "strict": true,
-      "watch": true,
       "skipLibCheck": true
     },
-    "exclude": ["AudioNodes", "./src/free-queue.ts", "./src/test.ts", "./src/AudioGraph.ts"]
+    "exclude": ["node_modules", "dist", "built", "scripts", "vendor", "AudioNodes", "./src/free-queue.ts", "./src/test.ts", "./src/AudioGraph.ts"]
 }
