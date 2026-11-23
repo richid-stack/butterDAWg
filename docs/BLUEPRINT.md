@@ -1,10 +1,10 @@
 # butterDAWg Pro — Feature Blueprint
 
-Snapshot of the working doc, 2026-11-23. Companion file: [BUILD_ORDER.md](BUILD_ORDER.md).
+Snapshot of the working doc, 2026-11-23, updated after phase 1 with the product decisions (see Decisions at the end). Companion file: [BUILD_ORDER.md](BUILD_ORDER.md).
 
 ## Vision and ground rules
 
-butterDAWg Pro is a beat-making workstation first: every feature below is judged by whether it makes a trap, drill, R&B or Afrobeat beat faster, tighter or better-sounding.
+butterDAWg Pro is a beat-making workstation first: every feature below is judged by whether it makes a trap, drill, R&B, Afrobeat or amapiano beat faster, tighter or better-sounding.
 
 Ground rules for the whole build:
 
@@ -12,7 +12,9 @@ Ground rules for the whole build:
 2. **Audio before chrome.** Timing, clean playback and reliable save/load come before new windows. A beat that drifts or clicks has failed, whatever the UI looks like.
 3. **Extend, don't rewrite.** The fork already has a Web Audio graph, a mixer, a playlist and a loadable plugin format. Each phase grows those.
 4. **Prove it by running it.** Every feature lands with a screenshot of the app running in the sandbox, so progress is visible.
-5. **Record every licence.** Each bundled sound, sample set or library is logged with its licence before it ships (see Risks, licensing and open decisions).
+5. **Record every licence.** Each bundled sound, sample set or library is logged with its licence before it ships (see Risks, licensing and decisions).
+6. **Build as if it ships.** Nothing is cut from the scope, and nothing is added that would block a commercial release later: no non-commercial samples or weights in the product, and every download verified by checksum.
+7. **One core, two shells.** The engine, DSP and project model must run in Electron and in a browser. Anything that touches files, windows or the OS sits behind a service interface (the preload bridge is the first one).
 
 **What "pro-grade" means here** is a checklist, not a mood:
 
@@ -135,11 +137,14 @@ These are additions aimed at trap, drill, R&B and Afrobeat beats. They are what 
 - **Root-note detection:** find the pitch of any 808 or bass sample on import and map it across the keyboard, so it plays in key.
 - **Slide notes:** note-to-note glide in the piano roll with an adjustable curve, for drill-style sliding 808s.
 - **Kick sidechain macro:** one knob that ducks the 808 under the kick.
+- **Kick and 808 layering:** phase and polarity alignment between the two, a low-end mono check, and tuning the 808 to the project key.
+- **Log drum (amapiano and Afrobeat):** a modelled pitched drum with a fast pitch glide, a resonant body and a short click, played from the piano roll with slides, so it sits as both bass and percussion.
 
 **Hi-hats and drums**
 
 - **Hi-hat roll tool:** draw rolls with ratchet subdivisions, triplets, velocity ramps and small pitch and pan variance, with one-click roll presets.
 - **Groove and humanise:** swing templates, triplet shuffle, and per-lane velocity and timing variance.
+- **Groove extraction:** read the swing and timing offsets from any drum loop or song and save them as a groove template you can apply to your own patterns.
 - **Kit builder:** assign any samples to 16 pads, with choke groups and per-pad envelope, pitch and filter, then save the kit.
 - **Fill generator:** propose a drum fill for the last bar of a pattern, which you accept or reject.
 
@@ -158,8 +163,12 @@ These are additions aimed at trap, drill, R&B and Afrobeat beats. They are what 
 
 **Genre starters and workflow**
 
-- **Starter projects** for trap, drill, R&B and Afrobeat with a drum rack, bus chain, tempo and key already set.
-- **Afrobeat percussion set:** shakers, congas and a synthesised log drum, built from the free libraries in the next section.
+- **Starter projects** for trap, drill, R&B, Afrobeat and amapiano with a drum rack, bus chain, tempo and key already set.
+- **Afrobeat and amapiano percussion set:** shakers, congas, rim and clap layers, and the log drum above, built from the free libraries in the next section and from your own kits.
+- **Genre arrangement templates:** intro, hook, verse and drop sections laid out on the playlist, with mute automation so each section changes in one click.
+- **One-knob transitions:** risers, reverse cymbals, tape-stop builds and impact hits made from your own sounds, placed at the end of a section.
+- **Library search:** find sounds by description, or drop in an example ("something like this snare") and get the closest matches from every library you have indexed.
+- **Translation check:** approximate phone-speaker, earbud and mono previews of the mix, with the master's loudness shown beside each.
 - **Drum, vocal and master chains** as one-knob macros, with a limiter and loudness meter on the master.
 - **Drop-a-loop setup:** detect BPM and key from a dropped file and set the project to match.
 
@@ -201,6 +210,15 @@ Ship a small default set (Splendid piano, Gogodze drums, Greg Sullivan keys, abo
 
 The sampler reads an SFZ subset directly (regions, key and velocity ranges, loops, envelopes, round-robin, key switches), because the free libraries above ship as SFZ. SF2 banks play through spessasynth.
 
+**Your own libraries**
+
+Drum kits first, then bass and guitar. The app indexes a folder you point it at and never copies it into the project repo or the installer.
+
+- Each library is a **user library**: it appears in the sound browser under "Your libraries", is analysed once (root pitch, length, loudness, kind of sound) and cached beside the folder, not inside it.
+- A library is marked *bundleable* only when you confirm you hold the rights to redistribute it. Until then it stays personal-use and is excluded from any shipped build.
+- Kit folders are read by name and layout (kick, snare, hat, 808, perc) and mapped to the 16-pad drum rack; you correct the mapping once and it is remembered.
+- For development, a small slice (one kit, the bass and the guitar) lives in a **private** repo that the build can attach, never in the public one.
+
 **Layer 3: modelled instruments**
 
 - **808 and sub bass:** oscillator, pitch envelope, saturation and glide.
@@ -222,6 +240,32 @@ The DSP is written as AudioWorklet and WebAssembly code. Faust is an option for 
 
 Prefer CC0 and public domain. CC-BY needs an in-app credits screen and credits in project metadata. Avoid non-commercial licences for anything shipped. Treat share-alike, freemium and custom licences as needing review. Keep a licence ledger in the repo (source link, licence, date checked) for every bundled sound. Samples cut from commercial songs need clearance before release; the app should keep the source info with each chop. This is not legal advice.
 
+## Sample Lab: generative models for samples
+
+Models are used to make **samples**, not songs: one-shots, textures, risers and variations that you audition and keep, then play from the sampler like any other sound. Checked on 23 November 2026 against the model pages.
+
+| Model | What it makes | Licence (from the page) | Verdict |
+| --- | --- | --- | --- |
+| [Stable Audio 3](https://stability.ai/news-updates/meet-stable-audio-3-the-model-family-built-for-artistic-experimentation-with-open-weight-models) (Small SFX, Small, Medium) | Sound effects and music, plus inpainting and extending. Small SFX and Small are built to run on-device, offline. | Community Licence: you own the outputs and can commercialise them; organisations above $1M annual revenue need the Enterprise licence. | Main candidate. Re-read the licence before any commercial launch. |
+| [Stable Audio Open Small](https://huggingface.co/stabilityai/stable-audio-open-small) | Up to 11 s of stereo 44.1 kHz audio from text. Trained on 486,492 CC0, CC-BY and CC Sampling+ recordings. | Community Licence; the page points to stability.ai/license for commercial use. | Fallback. |
+| [Magenta RealTime 2](https://huggingface.co/google/magenta-realtime-2) | Continuous 48 kHz stereo audio steered by text, audio or MIDI, about 200 ms latency, mostly instrumental. | Code Apache 2.0, weights CC BY 4.0 (credit required). | Good for jamming ideas that you resample. |
+| [MusicGen](https://facebookresearch.github.io/audiocraft/model_cards/MUSICGEN_MODEL_CARD.html) | Music | Weights CC-BY-NC 4.0 | Excluded: non-commercial. |
+| [Woosh (Sony)](https://sonyresearch.github.io/Woosh) | Sound effects | The page read states no licence for code or weights. | Blocked until the repo's licence is checked. |
+
+**What Sample Lab does**
+
+- Text to one-shot, texture or riser, eight variations at a time to audition and keep.
+- Round-robin variants of your own hits, so a single kick or snare stops sounding repeated.
+- Loop inpainting and extension for a loop you already have.
+- Fine-tuning on your own library, so generated kicks and snares match your kit.
+- Every result goes into the sampler with its model, version, prompt and licence recorded, and the licence ledger blocks export of a result whose model licence does not permit it.
+
+**What is not known yet**
+
+- Whether these models make good drum one-shots: I have not heard them do it, and the pages give no speed figures for laptops.
+- How to run them inside Electron and in a browser. This needs a spike (ONNX or WebGPU against a native helper process) before any design is fixed.
+- Ship Sample Lab as experimental, behind a switch, and judge it by ear.
+
 ## Assistive and analysis features
 
 Most of these run on the user's machine, so uploads stay private, and several need no machine learning at all. The assistant features depend on the project model from the first build phase.
@@ -241,7 +285,7 @@ Most of these run on the user's machine, so uploads stay private, and several ne
 
 Eight phases, with the audio engine and project model first so every later feature lands on solid ground. Each phase ends with screenshots of the running app and a short note on what changed. Task-level detail is in [BUILD_ORDER.md](BUILD_ORDER.md).
 
-1. **Foundation.** Upgrade to Electron 45, isolate the renderer behind a preload bridge, vendor the CDN assets, add TypeScript, a bundler and tests, and move repeated colours into tokens. *Done when* the app runs offline on Electron 45 with `contextIsolation` on and looks the same as today.
+1. **Foundation. Done (branch `phase-1-foundation`).** Upgrade to Electron 45, isolate the renderer behind a preload bridge, vendor the CDN assets, add TypeScript, a bundler and tests, and move repeated colours into tokens. *Done when* the app runs offline on Electron 45 with `contextIsolation` on and looks the same as today. Result: the start-up screenshot is byte-identical before and after the colour tokens, the smoke test passes 10 of 10 checks locally and on GitHub Actions, and the screenshots are in `docs/progress/`.
 2. **Engine core.** Lookahead scheduler with transport, loop and tempo map; fix sample loading (stereo, sample rate, MP3, FLAC, OGG); wire the master bus; equal-power pan and dB faders; offline render to WAV. *Done when* a five-minute loop plays without audible drift and the rendered WAV matches playback.
 3. **Project model.** A versioned JSON project with an assets folder, save and open, undo and redo, autosave. *Done when* save, close and reopen restores the playlist, mixer and plugins exactly.
 4. **Beat core.** SFZ-subset sampler, drum rack with step sequencer, piano roll, patterns in the playlist. *Done when* you can build an eight-bar trap beat with an 808 and hi-hat rolls, save it and export it.
@@ -250,13 +294,13 @@ Eight phases, with the audio engine and project model first so every later featu
 7. **Intelligence and plugins.** Stem split, audio to MIDI, BPM and key detection, reference A/B, describe-a-sound, the project assistant and a WebCLAP loader. *Done when* each runs on a real upload without freezing the audio.
 8. **Release.** Packaging with Electron Forge, installer and updater, crash recovery, a performance pass, and a full audit of the licence ledger. *Done when* a clean install on a fresh machine makes and exports a beat.
 
-## Risks, licensing and open decisions
+## Risks, licensing and decisions
 
-Four licences are still unverified and one licence file is inconsistent. None of them blocks the foundation phase.
+Four licences are still unverified. The licence file inconsistency is fixed. None of them blocks the next phase.
 
 **Licensing**
 
-- The repo's `LICENSE` is MIT (copyright 2022 Jan Bessler, the upstream author) but `package.json` says ISC. Keep the upstream notice and correct `package.json` to MIT.
+- The repo's `LICENSE` is MIT (copyright 2022 Jan Bessler, the upstream author). `package.json` now says MIT to match, and the upstream notice stays.
 - Not yet verified: the Signalsmith Stretch licence (its README does not state one), the licence of the HTDemucs model weights (check the Hugging Face model card), the licence of Faust-generated code, and the Sneakybass licence.
 - JUCE is AGPLv3 or a paid commercial licence, so adopting it for a native engine is a licensing decision as well as a technical one. The VST3 SDK is MIT from version 3.8; VST2 source is not covered.
 - Sample licences follow the rule in the instruments section, enforced through the licence ledger.
@@ -264,13 +308,20 @@ Four licences are still unverified and one licence file is inconsistent. None of
 **Technical risks**
 
 - Web Audio latency is higher and less controllable than native drivers such as ASIO. Keep the engine behind one interface so a native engine can replace it later.
-- Stem separation needs multi-threaded WebAssembly, which the demucs page says requires COOP and COEP headers. The app loads from `file://` today, so it may need a custom protocol or a local server. To confirm in the foundation phase.
+- Stem separation needs multi-threaded WebAssembly, which the demucs page says requires COOP and COEP headers. The app loads from `file://` today, so it may need a custom protocol or a local server. Still open from phase 1; the same headers will be needed in the browser build, so settle it once for both.
+- Still carried from phase 1: the CSP allows `'unsafe-eval'` because plugin hosts are evaluated (to be replaced with sandboxed iframes in phase 7), file reads through the bridge are synchronous (moved to async in phase 2), and Electron Forge is still on 7.x (Forge 8 needs Node 22.13 or later; checked when packaging in phase 8).
 - Multi-gigabyte libraries need streaming and caching designed in from the beat core phase, not added afterwards.
 - The UI uses a small hand-made JSX shim instead of a framework. Keep it for existing windows and draw heavy editors (piano roll, sampler waveform) on canvas, as the playlist already does.
 
-**Open decisions** (recommendation first)
+**Decisions** (made 2026-11-23)
 
-1. **Personal use or product?** Build as if it ships, which means no non-commercial samples, and decide later.
-2. **Electron only, or Electron plus a browser build?** Electron first, with file access behind one service so a browser build stays possible.
-3. **When to consider a native engine?** Not before the workflow phase, and only if latency or plugin hosting demands it.
-4. **Where do multi-gigabyte libraries download from?** A host you control, with checksums.
+1. **Personal use or product?** Build as if it ships. Commercial release is discussed later, but nothing is limited for it now: no non-commercial samples or weights, a licence ledger, checksummed downloads.
+2. **Electron only, or Electron plus a browser build?** Both, in the long run. Electron is built first; the engine, DSP and project model must not depend on Electron, and file access stays behind service interfaces so the browser build needs a new shell rather than a rewrite.
+3. **When to consider a native engine?** Not yet. A C++ engine would split the product in two when a browser build is wanted. Heavy DSP is written as WebAssembly-friendly code so the same core runs in both shells, and could be wrapped natively later. Revisit after phase 6, and only if measured latency or plugin hosting demands it. Native VST3 or AU plugins for other DAWs would be a separate project.
+4. **Where do multi-gigabyte libraries download from?** A host we control, with checksums:
+   - **Now: GitHub Releases.** Each release file must be under 2 GiB and a release holds up to 1,000 assets, with no stated limit on total size or bandwidth. Split each library into packs under 2 GiB. GitHub's page does not address using releases as a download service for a commercial product, so this is for development and early testers.
+   - **Before launch: Cloudflare R2.** $0.015 per GB-month, 10 GB free, no egress fees. By arithmetic, 50 GB of libraries is about $0.60 a month, ignoring operation fees.
+   - **The manifest makes the move cheap.** The app reads a manifest listing, for every pack, its URL, SHA-256, licence, size and credit text. It verifies the hash after download and refuses a mismatch. Changing host is then a manifest edit.
+5. **Your own libraries** stay out of the public repo (see Your own libraries in the instruments section). They are indexed in place and only bundled once you confirm the rights.
+
+Sources: [Cloudflare R2 pricing](https://developers.cloudflare.com/r2/pricing), [GitHub about releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
