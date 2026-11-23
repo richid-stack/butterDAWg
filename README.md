@@ -26,6 +26,24 @@ then run with
 ```
 npm run start
 ```
+(this bundles the renderer into `dist/` first, then launches Electron)
+
+Other commands:
+```
+npm run typecheck     # TypeScript check, no output files
+npm run build         # bundle the renderer only
+npm run smoke         # drive the real app: plugins, sample drag-and-drop, offline, no errors
+npm run shot -- name  # screenshot to docs/progress/name.png
+```
+`smoke` and `shot` need `xvfb` (and ImageMagick for `shot`) on Linux; `smoke` also needs the
+`playwright` or `playwright-core` package. Electron 45 downloads its binary the first time it
+runs; `node node_modules/electron/install.js` fetches it up front.
+
+The renderer runs sandboxed with no Node access; it reads files only through the bridge in
+`preload.js` and `main.js`, limited to `files/` and `plugins/`.
+
+The plan for turning this into a pro-grade beat-making DAW is in
+[docs/BLUEPRINT.md](docs/BLUEPRINT.md) and [docs/BUILD_ORDER.md](docs/BUILD_ORDER.md).
 
 # Build
 not yet
