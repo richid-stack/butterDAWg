@@ -8,31 +8,39 @@ Task-level plan for the eight phases in [BLUEPRINT.md](BLUEPRINT.md). Tick boxes
 - Use design tokens only (`styles/general.css`). Reuse the window frame in `styles/Window.css`.
 - Run the app under a virtual display after each task and save a screenshot to `docs/progress/` named `<phase>-<what>.png`. The baseline is `00-baseline-electron20.png`.
 - Every bundled sound or library gets a line in `LICENSES/sounds.md` (source link, licence, date checked) before it is committed.
-- The three commands below are what was used to run the app in the sandbox. Phase 1 turns them into `npm` scripts.
+- Day-to-day commands (all exist since phase 1):
 
 ```
 npm install
-npx tsc -p . --watch false          # compile to built/ (TypeScript is not yet a devDependency)
-xvfb-run -a -s "-screen 0 1800x1000x24" ./node_modules/.bin/electron . --no-sandbox --disable-gpu
+npm run typecheck       # TypeScript, no output files
+npm run build           # bundle the renderer into dist/
+npm run start           # build, then launch Electron
+npm run smoke           # drive the real app under a virtual display and check it
+npm run shot -- name    # screenshot to docs/progress/name.png
 ```
+
+- CI (`.github/workflows/ci.yml`) runs typecheck, build and the smoke test on every push to `main` and `phase-*` branches and on pull requests, and keeps the screenshot.
+- The audio engine, DSP and project model must not import Electron or Node modules. Anything that needs the OS goes behind a service interface, as the preload bridge does, so the browser build stays possible.
 
 ## Phase 1: Foundation
 
 Goal: a modern, secure, reproducible base with no visible change.
 
-- [ ] Upgrade `electron` to 45.x and the `@electron-forge/*` packages to current. Fix any API changes in `main.js`.
-- [ ] `main.js`: set `contextIsolation: true`, `nodeIntegration: false`, `nodeIntegrationInSubFrames: false`; add a content security policy.
-- [ ] `preload.js`: expose a small bridge (`readFile`, `listDir`, `readPlugin`) and replace direct `require("fs")` in `src/core/Source.ts`, `src/core/Plugin.ts`, `src/index.ts` and any other file that reads from disk.
-- [ ] Vendor Font Awesome, jQuery, desvg and Open Sans into `vendor/`; remove the CDN tags in `index.html`.
-- [ ] `package.json`: add TypeScript as a devDependency, prune the ~70 direct dependencies to what the code imports (keep `wavefile`, `uuid`, `electron-squirrel-startup`), set `"license": "MIT"` to match `LICENSE`.
-- [ ] `tsconfig.json`: remove `watch`, target ES2022; fix the three current type errors (`src/PaletteItem.ts:63`, `src/core/Source.ts:39`, `src/core/Channel.ts:22`).
-- [ ] Add a bundler script that outputs `built/`; make `npm start` build then launch.
-- [ ] Add `npm run shot`: launch under Xvfb, wait, save a screenshot to `docs/progress/`.
-- [ ] Add a CI workflow (GitHub Actions) that runs install, build and `npm run shot`.
-- [ ] Move repeated colours into tokens in `styles/general.css` per the blueprint table. No visual change.
-- [ ] Confirm whether threads for stem separation need a custom protocol instead of `file://` (see risks in the blueprint).
+- [x] Upgrade `electron` to 45.x. Fix any API changes in `main.js`. *Deferred:* the `@electron-forge/*` packages stay on 7.x until packaging is tested in phase 8 (Forge 8 needs Node 22.13 or later).
+- [x] `main.js`: set `contextIsolation: true`, `nodeIntegration: false` (sub-frames keep Electron's default, off), plus `sandbox: true`; add a content security policy.
+- [x] `preload.js`: expose a small bridge (`readFile`, `readdir`, `exists`, `isDirectory`, limited to `files/` and `plugins/`) and replace direct `require("fs")` in `src/core/Source.ts`, `src/core/Plugin.ts`, `src/index.ts` and any other file that reads from disk.
+- [x] Vendor Font Awesome and desvg into `vendor/`; remove the CDN tags in `index.html`. jQuery and Open Sans were removed instead, because nothing called jQuery and Open Sans was only a fallback font.
+- [x] `package.json`: add TypeScript as a devDependency, prune the ~70 direct dependencies to what the code imports (keep `wavefile`, `uuid`, `electron-squirrel-startup`), set `"license": "MIT"` to match `LICENSE`.
+- [x] `tsconfig.json`: remove `watch`, target ES2022; fix the three current type errors (`src/PaletteItem.ts:63`, `src/core/Source.ts:39`, `src/core/Channel.ts:22`).
+- [x] Add a bundler script (esbuild, outputs `dist/renderer.js`); make `npm start` build then launch.
+- [x] Add `npm run shot`: launch under Xvfb, wait, save a screenshot to `docs/progress/`.
+- [x] Add a CI workflow (GitHub Actions) that runs install, typecheck, build and the smoke test (`npm run smoke`, which also drives plugins and sample drag-and-drop and checks that nothing leaves the machine).
+- [x] Move repeated colours into tokens in `styles/general.css` per the blueprint table. No visual change (start-up screenshots byte-identical). *Left:* hex colours inside `.tsx` files (`Channel.tsx` style strings, `PlaylistWindow.tsx`) are not tokenised yet.
+- [ ] Confirm whether threads for stem separation need a custom protocol instead of `file://` (see risks in the blueprint). Still open; decide it once for Electron and the browser build.
 
 Done when: the app runs offline on Electron 45 with `contextIsolation` on, CI is green, and the new screenshot matches `00-baseline-electron20.png`.
+
+Status: **done** on branch `phase-1-foundation`. Typecheck is clean, the smoke test passes 10 of 10 locally and on GitHub Actions, and the screenshots are `01-electron45-isolated.png` and `02-smoke-after-drop.png`. The two open boxes above carry into later phases.
 
 ## Phase 2: Engine core
 
@@ -46,6 +54,7 @@ Goal: timing and signal path you can trust.
 - [ ] `src/core/Mixer.ts` and `src/core/Channel.ts`: route channels into the master channel, then the master into the speakers. Use `StereoPannerNode`. Map faders in dB. Add peak and RMS meters.
 - [ ] Rebuild the plugin chain from a list instead of disconnecting and reconnecting neighbours (`Channel.addPlugin`). Add a bypass flag.
 - [ ] Offline render path (`OfflineAudioContext`) that builds the same graph, plus a WAV writer for 16-bit, 24-bit and 32-bit float using `wavefile`.
+- [ ] Move the bridge's file reads from synchronous to asynchronous, behind a `FileService` interface that a browser shell can implement later.
 - [ ] Tests: scheduler timing maths, a render-versus-playback null test, and a stereo file test.
 
 Done when: a five-minute loop plays without audible drift, the rendered WAV matches playback, and stereo files at any sample rate play correctly.
@@ -60,6 +69,7 @@ Goal: save, reopen, undo.
 - [ ] File menu: New, Open, Save, Save As, Recent. Hook into the existing menu bar.
 - [ ] Autosave to a recovery file and a crash-recovery prompt on start.
 - [ ] "Collect and save": copy used samples into the project's assets folder.
+- [ ] Every asset in a project records its source and licence, so a chop or a generated sample keeps its origin.
 
 Done when: save, close and reopen restores the playlist, mixer and plugins exactly, and undo and redo work for every edit above.
 
@@ -73,6 +83,7 @@ Goal: make, save and export a trap beat.
 - [ ] Pattern model and step sequencer UI: 16, 32 and 64 steps, per-step velocity, probability, ratchet, pitch and pan, swing.
 - [ ] Piano roll window drawn on canvas like the playlist: note draw, move, resize, velocity lane, quantise, scale highlight, computer-keyboard and Web MIDI input.
 - [ ] Hi-hat roll tool and slide notes.
+- [ ] User libraries: point the app at a folder, index it in place (never copied into the repo or installer), map kit folders to the 16-pad rack by name and layout, and mark a library *bundleable* only on your confirmation.
 - [ ] Patterns as playlist clips, using the existing PAT and SONG toggle in the header.
 - [ ] Export WAV from the File menu using the offline render path from phase 2.
 
@@ -82,12 +93,14 @@ Done when: you can build an eight-bar trap beat with an 808 and hi-hat rolls, sa
 
 Goal: instruments and effects that sound professional.
 
-- [ ] Library manager: on-demand downloads with checksums, a cache folder, and a generated `LICENSES/sounds.md`.
+- [ ] Library manager: on-demand downloads from a manifest (URL, SHA-256, licence, size, credit text) with hash verification, a cache folder, and a generated `LICENSES/sounds.md`. Packs are split under 2 GiB and hosted on GitHub Releases at first, then Cloudflare R2 before launch.
 - [ ] Bundle the compact default set (Splendid Grand Piano, Gogodze Phu Vol II, Greg Sullivan E-Pianos) with an in-app credits screen for the CC-BY items.
-- [ ] 808 designer instrument; plucked-string model; FM keys.
+- [ ] 808 designer instrument; log drum instrument (amapiano and Afrobeat); plucked-string model; FM keys.
+- [ ] Kick and 808 layering: phase and polarity alignment, low-end mono check, and tuning the 808 to the project key.
 - [ ] Core effects as `.bdp` plugins: parametric EQ, compressor, limiter, convolution reverb, delay, saturation, bitcrusher. Add presets, bypass and saved state to the `.bdp` format.
 - [ ] Sample browser: folder indexing, waveform preview, audition during playback, drag into the rack or playlist.
 - [ ] Root-pitch detection on import and keyboard auto-mapping.
+- [ ] Library search by description and by example sound, over every indexed library.
 
 Done when: you sign off the default piano, drums and 808 by ear.
 
@@ -100,8 +113,11 @@ Goal: the fast beat-making tools.
 - [ ] Chopper: auto-slice, manual markers, play slices from the keyboard, record chop sequences.
 - [ ] Resample: bounce any channel into the sampler.
 - [ ] Time-stretch and pitch-shift (confirm the Signalsmith Stretch licence first).
-- [ ] Groove templates, kit builder and genre starter projects.
+- [ ] Groove templates, groove extraction from a loop or song, kit builder, and genre starter projects for trap, drill, R&B, Afrobeat and amapiano.
+- [ ] Genre arrangement templates (intro, hook, verse, drop with mute automation) and one-knob transitions (risers, reverse cymbals, tape-stop builds).
 - [ ] Mixer sends, buses, sidechain, kick-ducking macro, and mixer presets.
+- [ ] Translation check: phone-speaker, earbud and mono previews on the master.
+- [ ] Decision point: with latency measured on real hardware, revisit whether a native engine is needed (see Decisions in the blueprint).
 
 Done when: you can drop in a song, chop it, play the chops and bounce the result in a few minutes.
 
@@ -114,7 +130,8 @@ Goal: assistive features, all running on the user's machine.
 - [ ] Mix analysis (spectrum, LUFS, true peak, phase) and reference A/B.
 - [ ] Describe-a-sound: map a typed description to parameters on our own instruments and effects.
 - [ ] Project assistant that works only through the phase 3 command bus, with preview and accept or reject.
-- [ ] WebCLAP plugin loader alongside `.bdp`.
+- [ ] WebCLAP plugin loader alongside `.bdp`; move `.bdp` hosts into sandboxed iframes so the CSP can drop `'unsafe-eval'`.
+- [ ] Sample Lab spike: run Stable Audio 3 Small (SFX) in a worker or helper process, judge drum one-shot quality by ear, measure speed on a laptop, and recheck its licence. Then build text to one-shot, round-robin variants, loop inpainting and fine-tuning on your library behind an experimental switch. Do not use MusicGen (non-commercial) and hold Woosh until its licence is checked.
 
 Done when: each feature runs on a real upload without interrupting playback.
 

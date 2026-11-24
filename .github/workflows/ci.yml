@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "phase-*"]
+  pull_request:
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Electron 45 downloads its binary on first use, so fetch it explicitly
+      - run: node node_modules/electron/install.js
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Install virtual display and the Playwright Electron driver
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb
+          npm install --no-save playwright-core
+
+      - name: Smoke test (drives the real app)
+        run: xvfb-run -a -s "-screen 0 1800x1000x24" node scripts/smoke.cjs ci-smoke
+
+      - name: Keep the screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-screenshot
+          path: docs/progress/ci-smoke.png
+          if-no-files-found: ignore

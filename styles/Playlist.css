@@ -236,20 +236,20 @@
     fill: #8f979b;
 }
 .palette_scope > .tool_button:hover {
-    outline: solid 2px #d2d8dc;
-    color: #d2d8dc;
+    outline: solid 2px var(--tool-neutral);
+    color: var(--tool-neutral);
     outline-offset: 0px;
 }
 .palette_scope > .tool_button:hover > .automation_svg {
-    fill: #d2d8dc;
+    fill: var(--tool-neutral);
     transition: fill 0.3s;
 }
 .palette_scope > .tool_button:hover > .piano_svg {
-    fill: #d2d8dc;
+    fill: var(--tool-neutral);
     transition: fill 0.3s;
 }
 .palette_scope > .tool_button:hover > .wave_svg {
-    fill: #d2d8dc;
+    fill: var(--tool-neutral);
     transition: fill 0.3s;
 }
 .automation_svg {
@@ -368,13 +368,13 @@
     margin: 3px 0 0 2px;
 }
 #tool_brush:hover {
-    outline: solid 2px #7bcefd;
-    color: #7bcefd;
+    outline: solid 2px var(--tool-blue);
+    color: var(--tool-blue);
     outline-offset: 0px;
 }
 #tool_delete:hover {
-    outline: solid 2px #ff5b53;
-    color: #ff5b53;
+    outline: solid 2px var(--tool-red);
+    color: var(--tool-red);
     outline-offset: 0px;
 }
 #tool_mute > i{
@@ -386,13 +386,13 @@
     outline-offset: 0px;
 }
 #tool_resize:hover {
-    outline: solid 2px #ffa64a;
-    color: #ffa64a;
+    outline: solid 2px var(--accent-orange-light);
+    color: var(--accent-orange-light);
     outline-offset: 0px;
 }
 #tool_slice:hover {
-    outline: solid 2px #85b3ff;
-    color: #85b3ff;
+    outline: solid 2px var(--tool-blue-soft);
+    color: var(--tool-blue-soft);
     outline-offset: 0px;
 }
 #tool_expand:hover {
@@ -401,13 +401,13 @@
     outline-offset: 0px;
 }
 #tool_search:hover {
-    outline: solid 2px #85b3ff;
-    color: #85b3ff;
+    outline: solid 2px var(--tool-blue-soft);
+    color: var(--tool-blue-soft);
     outline-offset: 0px;
 }
 #tool_volume:hover {
-    outline: solid 2px #ffa64a;
-    color: #ffa64a;
+    outline: solid 2px var(--accent-orange-light);
+    color: var(--accent-orange-light);
     outline-offset: 0px;
 }
 

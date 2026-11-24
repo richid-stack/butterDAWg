@@ -45,7 +45,7 @@ export function loadPalette() {
 		});
 		return res;
 	}
-	let hirachy = <Map<string, string>>mapFolder(__dirname + "/../../../files");
+	let hirachy = <Map<string, string>>mapFolder(window.bridge.appRoot + "/files");
 
 	hirachy.forEach((element, key) => {
 		var a = new Item(key, element);

@@ -12,6 +12,22 @@
     --text-color: aliceblue;
 
     --bg-default: #656c76;
+
+    /* accents: orange = active state, green = LEDs and levels */
+    --accent-orange: #f76708;
+    --accent-orange-light: #ffa64a;
+    --led-on: #5cff5c;
+
+    /* playlist tool button outlines */
+    --tool-blue: #7bcefd;
+    --tool-blue-soft: #85b3ff;
+    --tool-red: #ff5b53;
+    --tool-neutral: #d2d8dc;
+
+    /* surfaces */
+    --header-bg: #596267;
+    --channel-bg: #374045;
+    --menu-border: #191f23;
 }
 
 * {
@@ -48,7 +64,7 @@ html {
 }
 
 header {
-    background-color: #596267;
+    background-color: var(--header-bg);
     height: min-content;
 }
 

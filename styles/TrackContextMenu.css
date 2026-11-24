@@ -2,7 +2,7 @@
     width: 257px;
     height: 50px;
     background-color: #21272b;
-    border: solid 1px #191f23;
+    border: solid 1px var(--menu-border);
     display: flex;
     position: absolute;
     z-index: 100;
@@ -116,7 +116,7 @@
     width: 255px;
     height: 255px;
     
-    border: solid 1px #191f23;
+    border: solid 1px var(--menu-border);
     box-sizing: border-box;
 }
 
@@ -186,7 +186,7 @@
 #color_picker_preview {
     width: 100px;
     height: 80px;
-    border: solid 1px #191f23;
+    border: solid 1px var(--menu-border);
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -223,7 +223,7 @@
     width: 20px;
     height: 255px;
     background: red;
-    border: solid 1px #191f23;
+    border: solid 1px var(--menu-border);
     box-sizing: border-box;
     right: 0px;
     top: 0px;
@@ -354,7 +354,7 @@
 
 /*#color_picker {
     background-color: #21272b;
-    border: solid 1px #191f23;
+    border: solid 1px var(--menu-border);
 }
 
 #color_picker input{

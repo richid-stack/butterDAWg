@@ -385,7 +385,7 @@ export class PlaylistWindow extends Window {
 
 		// key events handler
 		let track_cursor = this.get(".bars_cursor");
-		let cursor_anim: NodeJS.Timer = null;
+		let cursor_anim: ReturnType<typeof setInterval> = null;
 		globals.cursor_pos = track_cursor.offsetLeft;
 		const cursor_step = ms_to_pixels(globals.timeout);
 		this.addEventListener("keypress", (e: Event) => {

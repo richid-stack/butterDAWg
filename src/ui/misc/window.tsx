@@ -1,5 +1,4 @@
 import { createElement, cumulativeOffset, globals, React } from "../../globals";
-import { BrowserWindowConstructorOptions, BrowserWindow, ipcRenderer } from "electron";
 import { Color } from "./Color";
 
 export interface toolbarButtonOptions {
@@ -305,21 +304,6 @@ export abstract class Window {
     addEventListener(event: string, listener: (this: HTMLElement, e: Event) => any) {
         this.listeners.push({event: event, listener: listener});
         document.addEventListener(event, listener);
-    }
-
-    popOut() {
-        //ipcRenderer.on(this.id, (e) => {
-        //    alert("test");
-        //});
-        ipcRenderer.invoke("test", this.id, {
-            width: 800,
-            height: 500,
-            autoHideMenuBar: true,
-            webPreferences: {
-                nodeIntegration: true,
-                contextIsolation: false,
-            } as BrowserWindowConstructorOptions
-        }, "TestWindow");
     }
 
     close() {
