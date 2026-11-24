@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "build": "node scripts/build.mjs",
+    "test": "node scripts/test.mjs",
     "typecheck": "tsc -p . --noEmit",
     "start": "npm run build && electron .",
     "start:forge": "electron-forge start",

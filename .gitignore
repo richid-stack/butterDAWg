@@ -129,4 +129,4 @@ dist
 _ideas
 built
 
-ideas/
+ideas/.test-build/
