@@ -43,8 +43,10 @@ export interface SchedulerOptions {
 export interface SchedulerHost<C extends SchedulableClip = SchedulableClip> {
     /** play this clip */
     start(event: StartEvent<C>): void;
-    /** the timeline jumped or changed speed: drop everything that is scheduled but not yet audible, and fade out what is playing */
+    /** the timeline jumped: drop everything that is scheduled but not yet audible, and fade out what is playing */
     flush(): void;
+    /** the tempo changed: drop what is scheduled but not yet audible, and let what is playing carry on */
+    flushPending(): void;
 }
 
 export class Scheduler<C extends SchedulableClip = SchedulableClip> {
@@ -60,6 +62,7 @@ export class Scheduler<C extends SchedulableClip = SchedulableClip> {
     // the part of the timeline already handed out: everything before
     // (cursorBeat at cursorTime) has been scheduled
     private seenVersion = -1;
+    private seenJumpVersion = -1;
     private cursorBeat = 0;
     private cursorTime = 0;
     // true right after playing starts, a seek or a loop wrap, when clips that
@@ -98,13 +101,21 @@ export class Scheduler<C extends SchedulableClip = SchedulableClip> {
      */
     tick(): void {
         if (this.transport.version !== this.seenVersion) {
+            const jumpedTimeline = this.transport.jumpVersion !== this.seenJumpVersion;
             this.seenVersion = this.transport.version;
-            this.host.flush();
+            this.seenJumpVersion = this.transport.jumpVersion;
+            // A seek, play, stop or loop change drops all sound and starts over. A
+            // tempo change only moves what has not started yet: a clip that is
+            // already sounding is audio of fixed length, so it plays on, and
+            // restarting it would need to know how long it had really played
+            // (the tempo map no longer says).
+            if (jumpedTimeline) this.host.flush();
+            else this.host.flushPending();
             if (!this.transport.isPlaying) return;
             const anchor = this.transport.anchor;
             this.cursorBeat = anchor.beat;
             this.cursorTime = anchor.time;
-            this.jumped = true;
+            this.jumped = jumpedTimeline;
         }
         if (!this.transport.isPlaying) return;
 

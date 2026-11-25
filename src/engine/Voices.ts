@@ -7,8 +7,10 @@ import { SchedulableClip, SchedulerHost, StartEvent } from "./Scheduler";
 import { stereoGain } from "./nodes";
 
 export interface PlayableClip extends SchedulableClip {
-    /** null while the file is still loading; such clips are skipped */
+    /** null while the file is still loading */
     readonly buffer: AudioBuffer | null;
+    /** settles when the file has loaded (or failed to); a clip that is not loaded when it is due joins as soon as it is */
+    readonly loaded?: Promise<unknown>;
     /** where the clip's sound goes (usually its track's node) */
     readonly destination: AudioNode;
 }
@@ -21,6 +23,9 @@ interface Voice {
 
 export class Voices implements SchedulerHost<PlayableClip> {
     private active = new Set<Voice>();
+    // goes up on every flush, so starts that were waiting for a file to load
+    // are dropped if the timeline has moved on
+    private generation = 0;
 
     constructor(
         private ctx: BaseAudioContext,
@@ -34,7 +39,16 @@ export class Voices implements SchedulerHost<PlayableClip> {
 
     start(event: StartEvent<PlayableClip>): void {
         const buffer = event.clip.buffer;
-        if (!buffer) return;
+        if (!buffer) {
+            // The file has not finished loading. The scheduler will not offer this
+            // start again, so wait for the file and then join part-way in, the same
+            // as a start whose time has already passed.
+            const generation = this.generation;
+            event.clip.loaded?.then(() => {
+                if (generation === this.generation && event.clip.buffer) this.start(event);
+            });
+            return;
+        }
         const now = this.ctx.currentTime;
         let when = event.when;
         let offset = event.offset;
@@ -66,6 +80,7 @@ export class Voices implements SchedulerHost<PlayableClip> {
     }
 
     flush(): void {
+        this.generation++;
         const now = this.ctx.currentTime;
         for (const voice of this.active) {
             if (voice.when > now) {
@@ -86,6 +101,21 @@ export class Voices implements SchedulerHost<PlayableClip> {
                 } catch {
                     // already stopped
                 }
+            }
+        }
+    }
+
+    flushPending(): void {
+        this.generation++;
+        const now = this.ctx.currentTime;
+        for (const voice of this.active) {
+            if (voice.when > now) {
+                try {
+                    voice.source.stop();
+                } catch {
+                    // already stopped
+                }
+                this.release(voice);
             }
         }
     }

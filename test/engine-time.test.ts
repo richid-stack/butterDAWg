@@ -120,14 +120,15 @@ function setup(clips: TestClip[], bpm = 120) {
     const tr = new Transport(clock, new TempoMap(bpm));
     const events: StartEvent<TestClip>[] = [];
     let flushes = 0;
+    let pendingFlushes = 0;
     const sched = new Scheduler<TestClip>(
         tr,
         clock,
         { getClips: () => clips },
-        { start: (e) => events.push(e), flush: () => flushes++ },
+        { start: (e) => events.push(e), flush: () => flushes++, flushPending: () => pendingFlushes++ },
         { lookahead: 0.1 },
     );
-    return { clock, tr, sched, events, flushes: () => flushes };
+    return { clock, tr, sched, events, flushes: () => flushes, pendingFlushes: () => pendingFlushes };
 }
 
 test("scheduler: clips get exact start times regardless of how late ticks are", () => {
@@ -225,24 +226,71 @@ test("scheduler: clips that run past the loop end are cut at the loop end", () =
     close(events[1].when, 2); // restarts at the top of the loop
 });
 
-test("scheduler: seeking or changing tempo flushes and re-times what comes next", () => {
+test("scheduler: seeking flushes everything and a tempo change re-times what comes next", () => {
     const clips: TestClip[] = [{ id: "k", startBeat: 8, durationSeconds: 0.1 }];
-    const { clock, tr, sched, events, flushes } = setup(clips);
+    const { clock, tr, sched, events, flushes, pendingFlushes } = setup(clips);
     clock.time = 0;
     tr.play();
     sched.tick();
-    const before = flushes();
+    const before = pendingFlushes();
+    const flushesBefore = flushes();
     clock.time = 3.95; // beat 7.9, the clip is 0.05 s away: scheduled
     sched.tick();
     assert.equal(events.length, 1);
     close(events[0].when, 4);
     tr.setBpm(60); // beat 8 is now one more second away
     sched.tick();
-    assert.ok(flushes() > before);
+    // only what had not started yet was dropped; nothing that is sounding was touched
+    assert.equal(pendingFlushes(), before + 1);
+    assert.equal(flushes(), flushesBefore);
     clock.time = 4.0;
     sched.tick();
     clock.time = 5.0;
     sched.tick();
     const last = events[events.length - 1];
     close(last.when, 3.95 + (8 - 7.9) * 1, 1e-9); // 0.1 beat at 60 bpm = 0.1 s
+});
+
+test("scheduler: a tempo change while a clip is sounding does not restart it", () => {
+    // a ten-second clip from beat 0; at beat 4 (2 s in at 120 bpm) the tempo halves
+    const clips: TestClip[] = [
+        { id: "long", startBeat: 0, durationSeconds: 10 },
+        { id: "next", startBeat: 8, durationSeconds: 0.1 },
+    ];
+    const { clock, tr, sched, events, flushes, pendingFlushes } = setup(clips);
+    clock.time = 0;
+    tr.play();
+    sched.tick();
+    assert.equal(events.length, 1);
+    close(events[0].when, 0);
+    clock.time = 2; // beat 4
+    sched.tick();
+    tr.setBpm(60);
+    sched.tick();
+    clock.time = 3.95;
+    sched.tick();
+    // the long clip was not started again (not at the wrong offset either)...
+    assert.equal(events.filter((e) => e.clip.id === "long").length, 1);
+    assert.equal(flushes(), 1); // only the flush when playing started
+    assert.ok(pendingFlushes() >= 1);
+    // ...and the next clip comes where the new tempo puts it: 4 beats after beat 4 at 60 bpm
+    clock.time = 6.05;
+    sched.tick();
+    const next = events.find((e) => e.clip.id === "next");
+    assert.ok(next);
+    close(next.when, 2 + 4, 1e-9);
+});
+
+test("scheduler: seeking while a clip sounds starts it part-way in at the real position", () => {
+    const clips: TestClip[] = [{ id: "long", startBeat: 0, durationSeconds: 10 }];
+    const { clock, tr, sched, events } = setup(clips);
+    clock.time = 0;
+    tr.play();
+    sched.tick();
+    clock.time = 1;
+    tr.seek(6); // 3 s into the clip at 120 bpm
+    sched.tick();
+    const last = events[events.length - 1];
+    close(last.offset, 3);
+    close(last.when, 1);
 });

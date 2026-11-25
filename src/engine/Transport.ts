@@ -33,6 +33,7 @@ export class Transport {
     private returnBeat = 0; // where stop() puts the position back to
     private loop: LoopRegion | null = null;
     private _version = 0;
+    private _jumpVersion = 0;
     private listeners: Record<TransportEvent, Set<() => void>> = {
         state: new Set(),
         timeline: new Set(),
@@ -58,6 +59,15 @@ export class Transport {
      */
     get version(): number {
         return this._version;
+    }
+
+    /**
+     * Like `version`, but it does not go up for a tempo change. A tempo change
+     * moves what has yet to play, not what is already sounding, so the
+     * scheduler lets playing clips carry on; every other change restarts them.
+     */
+    get jumpVersion(): number {
+        return this._jumpVersion;
     }
 
     /** the position now, in beats */
@@ -149,14 +159,14 @@ export class Transport {
     setBpm(bpm: number): void {
         this.reanchor();
         this.tempo.setBpm(bpm);
-        this.changed(false);
+        this.changed(false, false);
     }
 
     /** Replaces the tempo map without moving the music that is playing. */
     setTempoPoints(points: Parameters<TempoMap["setPoints"]>[0]): void {
         this.reanchor();
         this.tempo.setPoints(points);
-        this.changed(false);
+        this.changed(false, false);
     }
 
     on(event: TransportEvent, callback: () => void): () => void {
@@ -178,8 +188,9 @@ export class Transport {
         return this.loop && beat < this.loop.endBeat ? this.loop : null;
     }
 
-    private changed(stateChanged: boolean): void {
+    private changed(stateChanged: boolean, jump = true): void {
         this._version++;
+        if (jump) this._jumpVersion++;
         if (stateChanged) this.listeners.state.forEach((cb) => cb());
         this.listeners.timeline.forEach((cb) => cb());
     }

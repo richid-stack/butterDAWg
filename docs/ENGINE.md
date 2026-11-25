@@ -36,11 +36,18 @@ late (even by 100 ms) changes nothing audible.
   start time to a billionth of a second.
 - A loop wraps the cursor at the loop end; a clip that would run past the loop end is faded out
   there (5 ms) and the next pass starts it again.
-- Seeking or changing tempo flushes what is scheduled but not yet audible and fades out what is
-  playing, then re-times the rest. If playing starts in the middle of a clip, the clip joins part
-  way in.
+- Seeking, stopping, playing or changing the loop drops what is scheduled but not yet audible and
+  fades out what is playing, then re-times the rest. If playing starts in the middle of a clip,
+  the clip joins part way in, at the position the tempo map gives.
+- A tempo change only drops what has not started yet and re-times it. A clip that is already
+  sounding is audio of fixed length and plays on untouched (restarting it would need how long it
+  had really played, which the new tempo map cannot say). Known limit: a clip that crosses the
+  loop end keeps its old cut time until the next pass, if the tempo changes during the pass.
 - A clip whose start time has already passed when it is scheduled (a stalled main thread) joins
   part way in instead of playing late.
+- A clip whose file has not finished loading when it is due waits for the file, then joins part
+  way in the same way, so pressing play straight after dropping a big file does not leave that
+  clip silent for the pass.
 
 `Voices` is the scheduler's host: one `AudioBufferSourceNode` and gain per played clip.
 
@@ -96,8 +103,11 @@ copied until the plugin format has a state API (Phase 5 and 7).
 | --- | --- |
 | `npm test` | Tempo maths both ways; transport anchoring, pause, seek, loop; scheduler start times under jittery ticks, a five-minute loop with no drift, loops, seeks and tempo changes; WAV files read back through an independent library; peaks against brute force; fader law. |
 | `npm run smoke` | The real app: no Node in the renderer, file bridge refuses outside paths, plugin loads and its slider works, a sample drags onto the playlist, play, stop and space work, no network, no console errors. |
-| `npm run test:engine` | The real audio engine: every format, channel count and rate decodes to the right channels and content; a stereo file renders correctly at 44.1, 48 and 96 kHz; a project (two tracks, pan, fader, a plugin, mono and stereo files at different rates) is played live and recorded at the master output, rendered offline, and the two are subtracted; a loop is played in real time and each click is measured against the ideal grid; exported WAV files hold exactly the rendered audio. |
+| `npm run test:engine` | The real audio engine: every format, channel count and rate decodes to the right channels and content; a stereo file renders correctly at 44.1, 48 and 96 kHz; a project (two tracks, pan, fader, a plugin, mono and stereo files at different rates) is played live and recorded at the master output, rendered offline, and the two are subtracted; a loop is played in real time and each click is measured against the ideal grid; exported WAV files hold exactly the rendered audio; a clip still loading when it is due joins and ends on time; a tempo change leaves a sounding clip unbroken. |
 | `npm run test:engine -- --long` | The same timing test for a real five minutes. |
 
 The null test found two real bugs while it was being written (cloned tracks playing every clip
-twice, and mono clips changing level depending on their neighbours); both are fixed and covered.
+twice, and mono clips changing level depending on their neighbours), and the automated review of
+the pull request found two more (clips still loading when due stayed silent; a tempo change
+restarted sounding clips at the wrong place). All four are fixed and each has a test that fails
+without the fix.

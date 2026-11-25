@@ -78,6 +78,10 @@ function makeFixtures() {
   writeWav("stereo-8k-8bit.wav", 8000, 8, [sine(500, 0.4, 8000, 1), sine(1500, 0.4, 8000, 1)]);
   expected["stereo-8k-8bit.wav"] = { channels: 2, seconds: 1, tones: [[500, 0.4], [1500, 0.4]], tolerance: 0.05 };
 
+  // long mono tones, for the tests where something changes while a clip is sounding
+  writeWav("long-tone.wav", 44100, 16, [sine(440, 0.5, 44100, 4)]);
+  writeWav("late-tone.wav", 44100, 16, [sine(440, 0.5, 44100, 3)]);
+
   // a single click: one sample of 0.9 and then silence, for measuring timing
   const click = new Float64Array(8820);
   click[0] = 0.9;
@@ -194,7 +198,10 @@ async function run() {
     ({ toneAmp, recorderCode, onsetCode }) => {
       window.T = {
         toneAmp: eval(toneAmp),
+        modules: new Set(),
         async addModule(code) {
+          if (window.T.modules.has(code)) return;
+          window.T.modules.add(code);
           const url = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
           await window.__bdp.globals.audiocontext.audioWorklet.addModule(url);
         },
@@ -409,6 +416,96 @@ async function run() {
       wav.fmt.numChannels === 2 && wav.fmt.sampleRate === live.rate && samples[0].length === live.frames && m <= limit,
       `${bits}, ${wav.fmt.numChannels}ch, ${wav.fmt.sampleRate} Hz, largest difference ${m.toExponential(1)}`);
   }
+
+  // ---- 6. a clip that is still loading when it is due ---------------------------
+  // The file takes half a second to arrive; playback starts at once. The clip
+  // must join when it has loaded, part-way in, and still end where the file ends.
+  const late = await page.evaluate(
+    async ({ recorderCode }) => {
+      const { globals, Sample } = window.__bdp;
+      const ctx = globals.audiocontext;
+      window.T.clearProject();
+      globals.playlist.getTracks()[0].connect(globals.mixer.getChannels()[0]);
+      globals.mixer.getChannels()[0].setPluginBypassed(0, true);
+      await window.T.addModule(recorderCode);
+      const samples = globals.engine.samples;
+      const load = samples.load.bind(samples);
+      samples.load = (p) => load(p).then((d) => new Promise((r) => setTimeout(() => r(d), 500)));
+      const sample = new Sample({ path: "files/.test/late-tone.wav", title: "late" });
+      samples.load = load;
+      sample.setStartBeat(0);
+      globals.playlist.getTracks()[0].addSample(sample);
+      await ctx.resume();
+      const rec = new AudioWorkletNode(ctx, "recorder", { numberOfInputs: 1, numberOfOutputs: 0, processorOptions: { frames: Math.round(ctx.sampleRate * 5) } });
+      globals.mixer.getMaster().getOutputNode().connect(rec);
+      const start = window.T.startFrame(0.1);
+      const loadedAtStart = sample.isLoaded();
+      globals.engine.transport.seek(0);
+      globals.engine.transport.playAt(start / ctx.sampleRate);
+      await window.T.wait(4400);
+      globals.engine.transport.stop();
+      await window.T.wait(100);
+      const got = await new Promise((resolve) => {
+        rec.port.onmessage = (e) => resolve(e.data);
+        rec.port.postMessage("dump");
+      });
+      globals.mixer.getMaster().getOutputNode().disconnect(rec);
+      const l = got.l;
+      const offset = start - got.first;
+      let first = -1, last = -1;
+      for (let i = offset; i < got.n; i++) if (Math.abs(l[i]) > 0.01) { if (first < 0) first = i - offset; last = i - offset; }
+      // the level once it is playing
+      const a = first + Math.round(ctx.sampleRate * 0.2), b = first + Math.round(ctx.sampleRate * 1.0);
+      return { loadedAtStart, rate: ctx.sampleRate, first, last, amp: window.T.toneAmp(l.subarray(offset), ctx.sampleRate, 440, a, b) };
+    },
+    inPage,
+  );
+  check("a clip that is still loading when it is due joins when it has loaded",
+    !late.loadedAtStart && late.first > 0.3 * late.rate && late.first < 1.5 * late.rate && Math.abs(late.amp - 0.5) < 0.03,
+    `starts ${(late.first / late.rate).toFixed(2)} s in, level ${late.amp.toFixed(3)}`);
+  check("...and still ends where the file ends (3 s)", Math.abs(late.last / late.rate - 3) < 0.05, `last sound at ${(late.last / late.rate).toFixed(3)} s`);
+
+  // ---- 7. a tempo change while a clip is sounding --------------------------------
+  // A four-second tone starts; a second in, the tempo halves. The tone has to carry
+  // on as if nothing happened: compare it with the ideal sine, sample by sample.
+  const tempo = await page.evaluate(
+    async ({ recorderCode }) => {
+      const { globals } = window.__bdp;
+      const ctx = globals.audiocontext;
+      window.T.clearProject();
+      globals.playlist.getTracks()[0].connect(globals.mixer.getChannels()[0]);
+      await window.T.place(0, "long-tone.wav", 0);
+      await window.T.addModule(recorderCode);
+      const rec = new AudioWorkletNode(ctx, "recorder", { numberOfInputs: 1, numberOfOutputs: 0, processorOptions: { frames: Math.round(ctx.sampleRate * 6) } });
+      globals.mixer.getMaster().getOutputNode().connect(rec);
+      const start = window.T.startFrame(0.4);
+      globals.engine.transport.seek(0);
+      globals.engine.transport.playAt(start / ctx.sampleRate);
+      while (ctx.currentTime < start / ctx.sampleRate + 1) await window.T.wait(10);
+      globals.bpm = 75;
+      while (ctx.currentTime < start / ctx.sampleRate + 3) await window.T.wait(10);
+      globals.engine.transport.stop();
+      await window.T.wait(100);
+      globals.bpm = 150;
+      const got = await new Promise((resolve) => {
+        rec.port.onmessage = (e) => resolve(e.data);
+        rec.port.postMessage("dump");
+      });
+      globals.mixer.getMaster().getOutputNode().disconnect(rec);
+      const offset = start - got.first;
+      let worst = 0, worstAt = 0;
+      const from = Math.round(ctx.sampleRate * 0.05), to = Math.round(ctx.sampleRate * 2.9);
+      for (let n = from; n < to; n++) {
+        const want = 0.5 * Math.sin((2 * Math.PI * 440 * n) / ctx.sampleRate);
+        const d = Math.abs(got.l[offset + n] - want);
+        if (d > worst) { worst = d; worstAt = n; }
+      }
+      return { worst, worstAt, rate: ctx.sampleRate };
+    },
+    inPage,
+  );
+  check("a tempo change does not interrupt or restart a clip that is playing", tempo.worst < 2e-3,
+    `largest difference from the ideal tone ${tempo.worst.toExponential(2)} at ${(tempo.worstAt / tempo.rate).toFixed(3)} s`);
 
   // ---- 4. a looping clip stays on the beat ---------------------------------------
   const seconds = process.env.BDP_SECONDS ? Number(process.env.BDP_SECONDS) : long ? 300 : 20;
