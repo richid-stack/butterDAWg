@@ -1,16 +1,8 @@
-import { readdirSync } from "fs";
+import { files } from "../platform/files";
+export { getPluginNameFromPath } from "../core/Plugin";
 
-export function discoverPlugins() {
-    // scan the built-in plugin folder
-    let plugins = readdirSync("plugins/");
-    plugins = plugins.map(v => "plugins/" + v);
-
-    // the returned paths can either be absolute or relative to the source dir
-    return plugins;
-}
-
-export function getPluginNameFromPath(pluginPath: string) {
-    const folderName = pluginPath.split('\\').pop().split('/').pop();
-    const pluginName = folderName.substring(0, folderName.lastIndexOf("."));
-    return pluginName;
+/** the folders in plugins/ that hold a plugin, as paths relative to the app folder */
+export async function discoverPlugins(): Promise<string[]> {
+    const entries = await files.list("plugins");
+    return entries.filter((e) => e.isDirectory && !e.name.startsWith(".")).map((e) => "plugins/" + e.name);
 }

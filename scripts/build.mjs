@@ -1,8 +1,8 @@
 // Bundles the renderer (src/index.ts) into dist/renderer.js.
 //
-// The renderer runs with contextIsolation on and Node off, so Node-only
-// modules are swapped for shims that talk to the main process through the
-// preload bridge (see preload.js and main.js).
+// The renderer runs with contextIsolation on and Node off. Files are read
+// through src/platform/files.ts, which uses the preload bridge (see preload.js
+// and main.js).
 import { build } from "esbuild";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,4 @@ await build({
   target: "es2022",
   sourcemap: true,
   logLevel: "info",
-  alias: {
-    fs: "./src/platform/fs.ts",
-  },
 });

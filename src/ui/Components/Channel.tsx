@@ -1,5 +1,6 @@
 import { Channel } from "../../core/Channel";
 import { globals, React } from "../../globals";
+import { faderToGain, gainToFader, gainToDb, formatDb } from "../../engine/dsp";
 
 const clamp = (num: number, min: number, max: number) => {return Math.max(min, Math.min(max, num));};
 
@@ -50,12 +51,12 @@ export class ChannelComponent {
         // volume level slider
         let volume_slider = this.element.querySelector(".channel_volume_knob") as HTMLElement;
         let channel = this.channel;
-        // TODO maybe put this into another helper module
-        const channel_max_volume = 1.25;
+        // the fader is in decibels: 0 dB (unity) is a fifth of the way down from the top,
+        // the top is +6 dB (see engine/dsp.ts for the law)
         function slider_move(e: MouseEvent) {
 			let percent = clamp(((volume_slider.offsetTop + volume_slider.clientHeight/2) + e.movementY)/volume_slider.parentElement.clientHeight, 0, 1);
-            channel.setVolume(channel_max_volume - percent*channel_max_volume);
-			globals.header_help_text.innerHTML = "Volume: " + Math.round(channel.getVolume()*100) + "%";
+            channel.setVolume(faderToGain(1 - percent));
+			globals.header_help_text.innerHTML = "Volume: " + formatDb(channel.getVolume());
             volume_slider.style.top = "calc(" + percent*100 + "% - " + volume_slider.clientHeight/2 + "px)";
 		}
         volume_slider.addEventListener("mousedown", () => {
@@ -65,7 +66,7 @@ export class ChannelComponent {
             document.removeEventListener("mousemove", slider_move);
         });
         volume_slider.addEventListener("mouseenter", () => {
-			globals.header_help_text.innerHTML = "Volume: " + Math.round(this.channel.getVolume()*100) + "%";
+			globals.header_help_text.innerHTML = "Volume: " + formatDb(this.channel.getVolume());
 		});
 
         // toggle switch
@@ -129,25 +130,21 @@ export class ChannelComponent {
             this.select(true);
         });
 
-        // level update
+        // level meter: the highest level of the last few milliseconds, in dB
+        // from -60 (empty) to 0 (full); it falls back slowly so a hit stays visible
         let level_indicator = this.element.querySelector(".indicator_top") as HTMLElement;
-        let temp_this = this;
-        function step() {
-                requestAnimationFrame(() => {
-                    if (globals.is_playing) {
-                        //let node = (temp_this.channel.getAudioNode() as AnalyserNode);
-                        //let buffer = new Float32Array(node.frequencyBinCount);
-                        //node.getFloatTimeDomainData(buffer);
-                        let buffer = temp_this.channel.getFloatTimeDomainData();
-                        let max = buffer.reduce((prev, current) => {
-                            return Math.max(current, prev);
-                        });
-                        level_indicator.style.height = (1 - max) * 100 + "%";
-                    }
-                    requestAnimationFrame(step);
-            });
+        let shown = 0;
+        const step = () => {
+            const peak = this.channel.getPeak();
+            const level = clamp((gainToDb(peak) + 60) / 60, 0, 1);
+            shown = Math.max(level, shown - 0.015);
+            const height = ((1 - shown) * 100).toFixed(1) + "%";
+            if (level_indicator.style.height !== height) {
+                level_indicator.style.height = height;
+            }
+            requestAnimationFrame(step);
         };
-        step();
+        requestAnimationFrame(step);
     }
 
     getElement() {
@@ -211,6 +208,6 @@ export class ChannelComponent {
 
         // update the volume slider
         let volume_slider = this.element.querySelector(".channel_volume_knob") as HTMLElement;
-        volume_slider.style.top = "calc(" + (100-this.channel.getVolume()/1.25*100) + "% - " + volume_slider.clientHeight/2 + "px)";
+        volume_slider.style.top = "calc(" + (100 - gainToFader(this.channel.getVolume())*100) + "% - " + volume_slider.clientHeight/2 + "px)";
     }
 }

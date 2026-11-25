@@ -2,32 +2,44 @@ import { Color } from "../ui/misc/Color";
 import { Connectable, globals } from "../globals";
 import { Sample } from "./Sample";
 
-export class Track implements Connectable {
+// A playlist track holds clips. All its clips play into one node, which goes to
+// one mixer channel. The track does not play anything itself; the scheduler
+// starts its clips (see engine/Scheduler.ts).
 
-    private audionode: AudioNode;
+export class Track implements Connectable {
+    readonly ctx: BaseAudioContext;
+    private audionode: GainNode;
     private samples: Array<Sample>;
     private enabled: boolean;
+    private target: Connectable | null = null;
 
     // ui stuff
     public title: string;
     public color: Color;
 
-    constructor() {
+    constructor(ctx: BaseAudioContext = globals.audiocontext) {
+        this.ctx = ctx;
         this.enabled = true;
         this.samples = [];
 
         this.title = "";
         this.color = new Color("#646e73");
 
-        this.audionode = new GainNode(globals.audiocontext);
+        this.audionode = new GainNode(ctx);
     }
 
     isActive() {
         return this.enabled;
     }
 
+    /** a disabled track is muted; its clips keep their place and time */
     setActive(active: boolean) {
         this.enabled = active;
+        if (this.ctx instanceof AudioContext) {
+            this.audionode.gain.setTargetAtTime(active ? 1 : 0, this.ctx.currentTime, 0.005);
+        } else {
+            this.audionode.gain.value = active ? 1 : 0;
+        }
     }
 
     getSamples() {
@@ -35,34 +47,45 @@ export class Track implements Connectable {
     }
 
     removeSample(sample: Sample) {
-        sample.disconnect(this);
-        this.samples.splice(this.samples.indexOf(sample), 1);
+        const i = this.samples.indexOf(sample);
+        if (i !== -1) this.samples.splice(i, 1);
+        if (sample.track === this) sample.track = null;
     }
 
     addSample(sample: Sample) {
-        sample.connect(this);
+        sample.track = this;
         this.samples.push(sample);
     }
 
-    play() {
-        this.samples.forEach(sample => {
-            let node = sample.getAudioNode();
-		    const timestamp = globals.audiocontext.currentTime + (sample.getTimestamp() - globals.current_time/1000);
-            // TODO there is also a offset parameter in .start() -> use that when the cursor is somewhere
-		    // in the middle of the sample
-            if (timestamp >= globals.audiocontext.currentTime) {
-                node.start(timestamp);
-            } else if (timestamp + sample.getDuration()/1000 >= globals.audiocontext.currentTime) {
-                node.start(globals.audiocontext.currentTime, globals.audiocontext.currentTime - timestamp);
-            }
-        });
+    /** Sends this track's sound to one place; an earlier connection is dropped. */
+    connect(object: Connectable) {
+        this.audionode.disconnect();
+        this.audionode.connect(object.getAudioNode());
+        this.target = object;
     }
 
-    connect(object: Connectable) {
-        this.audionode.connect(object.getAudioNode());
+    getTarget(): Connectable | null {
+        return this.target;
     }
 
     getAudioNode(): AudioNode {
         return this.audionode;
+    }
+
+    /**
+     * A copy in another audio context, with copies of its clips. `route` says
+     * which channel in the new mixer takes the place of the track's channel.
+     */
+    cloneTo(ctx: BaseAudioContext, route: (target: Connectable) => Connectable | null): Track {
+        const copy = new Track(ctx);
+        copy.title = this.title;
+        copy.color = this.color;
+        copy.setActive(this.enabled);
+        if (this.target) {
+            const target = route(this.target);
+            if (target) copy.connect(target);
+        }
+        for (const sample of this.samples) copy.addSample(sample.cloneFor(copy));
+        return copy;
     }
 }

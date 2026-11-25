@@ -4,16 +4,13 @@ import {
 	addDragListener,
 	cumulativeOffset,
 	globals,
-	ms_to_pixels,
-	px_to_timestamp,
+	beats_to_px,
+	px_to_beats,
 	React,
 	snap,
-	timestamp_to_px,
-	pixels_to_ms,
 } from "../../globals";
 import { Item } from "../../PaletteItem";
 import { TrackComponent } from "../../Track";
-import { msToTime } from "../../util/time";
 import { Color } from "../misc/Color";
 import { toolbarButtonOptions, Window, WindowType } from "../misc/window";
 
@@ -43,6 +40,7 @@ export class PlaylistWindow extends Window {
 	private maxBeats: number;
 	private zoom: number;
 	private sampleCanvasBuffer: Map<Sample, HTMLCanvasElement>;
+	private watchedSamples = new WeakSet<Sample>();
 	private lastMousePos: { x: number; y: number };
 	private selection: Selection;
 
@@ -166,7 +164,6 @@ export class PlaylistWindow extends Window {
 			if (e.ctrlKey) {
 				e.preventDefault();
 				let delta = e.deltaY / Math.min(Math.max(globals.xsnap, 10), 40);
-				console.log(globals.xsnap);
 
 				globals.xsnap -= delta;
 
@@ -267,8 +264,8 @@ export class PlaylistWindow extends Window {
 				}
 
 				// set x pos of drag element
-				(globals.current_drag_element_preview as Sample).setTimestamp(
-					px_to_timestamp(snap(e.clientX - base.left + this.scroll)),
+				(globals.current_drag_element_preview as Sample).setStartBeat(
+					px_to_beats(snap(e.clientX - base.left + this.scroll)),
 				);
 
 				// set y pos of drag element
@@ -310,8 +307,8 @@ export class PlaylistWindow extends Window {
 				this.updatePlaylist();
 			} else if (current_drag_element && e.buttons === 1) {
 				const s = current_drag_element as Sample;
-				s.setTimestamp(
-					px_to_timestamp(snap(e.clientX - base.left - drag_offset)),
+				s.setStartBeat(
+					px_to_beats(snap(e.clientX - base.left - drag_offset)),
 				);
 				let sample_track = this.getTrackOfSample(s).filter(
 					(t) => t !== null,
@@ -334,7 +331,7 @@ export class PlaylistWindow extends Window {
 				drag_offset =
 					e.clientX -
 					base.left -
-					timestamp_to_px(current_drag_element.getTimestamp());
+					beats_to_px(current_drag_element.getStartBeat());
 				
 				// check if the sample should be selected.
 				// sample selection only occurs on the title bar,
@@ -383,48 +380,30 @@ export class PlaylistWindow extends Window {
 			true,
 		);
 
-		// key events handler
+		// key events handler: space starts and pauses playback
 		let track_cursor = this.get(".bars_cursor");
-		let cursor_anim: ReturnType<typeof setInterval> = null;
-		globals.cursor_pos = track_cursor.offsetLeft;
-		const cursor_step = ms_to_pixels(globals.timeout);
 		this.addEventListener("keypress", (e: Event) => {
 			if ((e as KeyboardEvent).code === "Space") {
 				e.preventDefault();
-				console.log(globals.xsnap, this.zoom, globals.audiocontext.currentTime, globals.current_time)
-				if (!globals.is_playing) {
-					globals.playlist.play();
-
-					// play cursor animation
-					cursor_anim = setInterval(() => {
-						globals.cursor_pos += ms_to_pixels(globals.timeout) * this.zoom;
-						globals.current_time += globals.timeout;
-						this.updateCursor();
-					}, globals.timeout);
-
-					console.log("playback started");
-				} else {
-					clearInterval(cursor_anim);
-
-					globals.audiocontext.suspend();
-
-					globals.playlist.stop();
-
-					console.log("playback stopped");
-				}
-
-				globals.is_playing = !globals.is_playing;
+				globals.engine.toggle().catch((err) => console.error("could not start playback", err));
 			}
 		});
+
+		// the cursor follows the transport, and dragging it moves the transport
+		const followTransport = () => {
+			if (!document.contains(track_cursor)) {
+				return; // the window was closed
+			}
+			this.updateCursor();
+			requestAnimationFrame(followTransport);
+		};
+		requestAnimationFrame(followTransport);
 
 		addDragListener(
 			track_cursor,
 			(e: MouseEvent) => {
-				globals.cursor_pos += e.movementX * this.zoom;
-				globals.cursor_pos = Math.max(globals.cursor_pos, -10);
-				globals.current_time = pixels_to_ms(
-					(globals.cursor_pos + 10) / this.zoom,
-				);
+				const left = cumulativeOffset(this.get(".bars_canvas")).left;
+				globals.engine.seek(Math.max(0, px_to_beats(e.clientX - left + this.scroll)));
 				this.updateCursor();
 			},
 			true,
@@ -591,12 +570,15 @@ export class PlaylistWindow extends Window {
 	}
 
 	updateCursor() {
-		// tmp
-		const timeLabel = document.querySelector(".header_time > label");
-		timeLabel.textContent = msToTime(globals.current_time);
-
-		let track_cursor = this.get(".bars_cursor");
-		track_cursor.style.left = ((globals.cursor_pos + 10) / this.zoom - this.scroll - 10) + "px";
+		// while playing, show where the sound coming out of the speakers is
+		const engine = globals.engine;
+		const beat = engine.transport.isPlaying ? engine.displayPosition() : engine.transport.position;
+		const track_cursor = this.get(".bars_cursor");
+		// the cursor's line is 10px in from the left edge of its element
+		const left = beats_to_px(beat) - this.scroll - 10 + "px";
+		if (track_cursor.style.left !== left) {
+			track_cursor.style.left = left;
+		}
 	}
 
 	updateBarLabels() {
@@ -711,7 +693,11 @@ export class PlaylistWindow extends Window {
 			for (let j = 0; j < trackSamples.length; j++) {
 				const sample = trackSamples[j];
 
-				if (!this.sampleCanvasBuffer.has(sample)) {
+				// the waveform is drawn once at the clip's current width; it is drawn
+				// again when the width changes (zoom, tempo) or the file has loaded
+				const cached = this.sampleCanvasBuffer.get(sample);
+				const wantedWidth = Math.max(1, Math.round(beats_to_px(sample.getDurationBeats())));
+				if (!cached || cached.width !== wantedWidth || cached.height !== trackHeight) {
 					this.sampleCanvasBuffer.set(
 						sample,
 						this.createCanvasForSample(sample, trackHeight),
@@ -719,8 +705,17 @@ export class PlaylistWindow extends Window {
 				}
 
 				const color = track.color;
-				const sampleX = timestamp_to_px(sample.getTimestamp()) - o;
-				const sampleWidth = ms_to_pixels(sample.getDuration() * 1000);
+				// redraw when the file has finished loading, since that is when its length is known
+				if (!sample.isLoaded() && !sample.hasFailed() && !this.watchedSamples.has(sample)) {
+					this.watchedSamples.add(sample);
+					sample.onLoaded(() => this.updatePlaylist());
+				}
+				// a clip whose file has not loaded has no length yet; it is drawn when it has
+				if (!sample.isLoaded()) {
+					continue;
+				}
+				const sampleX = beats_to_px(sample.getStartBeat()) - o;
+				const sampleWidth = beats_to_px(sample.getDurationBeats());
 
 				// sample background
 				ctx.strokeStyle = color + "b0";
@@ -750,9 +745,13 @@ export class PlaylistWindow extends Window {
 					if (ctx.measureText(text).width < maxWidth) {
 						return text;
 					}
+					// nothing fits in a clip that narrow
+					if (!(maxWidth > 0)) {
+						return "";
+					}
 
 					let res = text;
-					while (ctx.measureText(res + "...").width > maxWidth) {
+					while (res.length > 0 && ctx.measureText(res + "...").width > maxWidth) {
 						res = res.slice(0, res.length - 1);
 					}
 					return res + "...";
@@ -778,27 +777,24 @@ export class PlaylistWindow extends Window {
 
 	private createCanvasForSample(sample: Sample, height: number) {
 		let canvas = document.createElement("canvas");
-		canvas.width = ms_to_pixels(sample.getDuration() * 1000);
+		canvas.width = Math.max(1, Math.round(beats_to_px(sample.getDurationBeats())));
 		canvas.height = height;
-		let ctx = canvas.getContext("2d");
-		ctx.imageSmoothingEnabled = false;
-		ctx.translate(0.5, 0.5);
-		ctx.beginPath();
-		ctx.lineCap = "round";
-		ctx.lineJoin = "bevel";
-		ctx.strokeStyle = "#fff";
-		ctx.lineWidth = 1.2;
-		let step = sample.getData().length / canvas.width;
-		ctx.moveTo(0, canvas.height * 1.5);
-		for (let i = 0; i < sample.getData().length; i += 2) {
-			ctx.lineTo(
-				i / step,
-				Math.sin(sample.getData()[i] * 100 * (Math.PI / 180)) * 30 +
-				canvas.height / 2,
-			);
+		const peaks = sample.getPeaks();
+		if (!peaks) {
+			return canvas; // still loading: nothing to draw yet
 		}
-		ctx.stroke();
-
+		let ctx = canvas.getContext("2d");
+		ctx.fillStyle = "#fff";
+		// one column of pixels per min/max pair: a bar from the lowest to the
+		// highest sample in that part of the file
+		const columns = peaks.resample(canvas.width);
+		const mid = canvas.height / 2;
+		const scale = canvas.height / 2 - 2;
+		for (let x = 0; x < canvas.width; x++) {
+			const top = mid - Math.min(1, columns.max[x]) * scale;
+			const bottom = mid - Math.max(-1, columns.min[x]) * scale;
+			ctx.fillRect(x, top, 1, Math.max(1, bottom - top));
+		}
 		return canvas;
 	}
 
@@ -831,9 +827,9 @@ export class PlaylistWindow extends Window {
 					this.point_in_rect(
 						this.lastMousePos.x - base.left + this.scroll,
 						this.lastMousePos.y - base.top,
-						timestamp_to_px(sample.getTimestamp()),
+						beats_to_px(sample.getStartBeat()),
 						current_offset - this.get(".tracks").scrollTop,
-						ms_to_pixels(sample.getDuration() * 1000),
+						beats_to_px(sample.getDurationBeats()),
 						globals.tracks[index].getHeight(),
 					),
 					sample,
@@ -842,7 +838,6 @@ export class PlaylistWindow extends Window {
 			current_offset += globals.tracks[index].getHeight();
 			return res;
 		});
-		console.log(targets);
 		return targets.some((v) => v[0])
 			? targets[targets.findIndex((v) => v[0])][1]
 			: null;
@@ -878,7 +873,7 @@ export class PlaylistWindow extends Window {
 		this.sampleCanvasBuffer.forEach((v, k) => {
 			this.sampleCanvasBuffer.set(
 				k,
-				this.createCanvasForSample(k, 70),
+				this.createCanvasForSample(k, v.height),
 			);
 		});
 	}

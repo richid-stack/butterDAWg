@@ -69,19 +69,21 @@ function check(name, ok, detail = "") {
   check("bridge is exposed", world.bridge === "object");
 
   // --- file bridge -------------------------------------------------------
-  const plugins = await page.evaluate(() => window.bridge.fs.readdir("plugins"));
+  const plugins = (await page.evaluate(() => window.bridge.fs.list("plugins"))).map((e) => e.name);
   check("bridge lists the plugins folder", plugins.includes("Gain.bdp"), plugins.join(", "));
 
-  const denied = await page.evaluate(() => {
+  const denied = await page.evaluate(async () => {
     const tries = ["package.json", "/etc/passwd", "plugins/../package.json"];
-    return tries.map((p) => {
-      try {
-        window.bridge.fs.readFile(p);
-        return p + " -> READ";
-      } catch (e) {
-        return /outside the readable folders|ENOENT/.test(e.message) ? "refused" : p + " -> " + e.message;
-      }
-    });
+    return Promise.all(
+      tries.map(async (p) => {
+        try {
+          await window.bridge.fs.readFile(p);
+          return p + " -> READ";
+        } catch (e) {
+          return /outside the readable folders|ENOENT/.test(e.message) ? "refused" : p + " -> " + e.message;
+        }
+      }),
+    );
   });
   check("bridge refuses paths outside files/ and plugins/", denied.every((d) => d === "refused"), denied.join("; "));
 

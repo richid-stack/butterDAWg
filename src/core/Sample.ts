@@ -1,71 +1,118 @@
-import { Connectable, globals } from "../globals";
-import { Item } from "../PaletteItem";
+import { globals } from "../globals";
+import { PlayableClip } from "../engine/Voices";
+import { Peaks } from "../engine/Peaks";
+import { Track } from "./Track";
 
-export class Sample {
+// An audio clip on the playlist: one placement of an audio file. Its position
+// is in beats, so changing the tempo moves the music but not the clips. Its
+// length is in seconds, because that is how long the file is.
 
+export interface SampleSource {
+    /** where to read the file from */
+    path: string;
+    /** the name to show */
+    title: string;
+}
+
+export class Sample implements PlayableClip {
+    readonly path: string;
     private name: string;
-    private timestamp: number;
-    private data: Float64Array;
-    private duration: number;
-    private buffer: AudioBuffer;
-    private source: AudioBufferSourceNode;
-    private connections: Array<Connectable>;
+    private start = 0; // beats
+    private audio: AudioBuffer | null = null;
+    private waveform: Peaks | null = null;
+    private loadError: unknown = null;
+    private listeners = new Set<() => void>();
 
-    constructor(item: Item) {
-        this.timestamp = 0;
-        this.data = item.getData();
-        this.duration = item.getDuration();
-        this.name = item.title;
+    /** the track this clip is on; set by Track.addSample */
+    track: Track | null = null;
+    /** resolves when the file has been read and decoded */
+    readonly loaded: Promise<void>;
 
-        this.connections = [];
-
-        this.loadAudio();
+    constructor(source: SampleSource) {
+        this.path = source.path;
+        this.name = source.title;
+        this.loaded = globals.engine.samples
+            .load(this.path)
+            .then((decoded) => {
+                this.audio = decoded.buffer;
+                this.waveform = decoded.peaks;
+            })
+            .catch((err) => {
+                this.loadError = err;
+                console.error("could not load " + this.path, err);
+            })
+            .then(() => this.listeners.forEach((cb) => cb()));
     }
 
-    getTimestamp() {
-        return this.timestamp;
+    get startBeat(): number {
+        return this.start;
     }
 
-    setTimestamp(timestamp: number) {
-        this.timestamp = timestamp;
+    setStartBeat(beat: number) {
+        this.start = beat;
     }
 
-    getData() {
-        return this.data;
+    getStartBeat() {
+        return this.start;
     }
 
-    getDuration() {
-        return this.duration;
+    get buffer(): AudioBuffer | null {
+        return this.audio;
     }
 
-    async loadAudio() {
-		this.buffer = globals.audiocontext.createBuffer(2, this.data.length, globals.audiocontext.sampleRate * 2);
-		this.buffer.copyToChannel(Float32Array.from(this.data), 0);
-		this.buffer.copyToChannel(Float32Array.from(this.data), 1);
+    get durationSeconds(): number {
+        return this.audio ? this.audio.duration : 0;
     }
 
-    getAudioNode() {
-        this.source = new AudioBufferSourceNode(globals.audiocontext, {buffer: this.buffer});
-        this.connections.forEach(conn => this.source.connect(conn.getAudioNode()));
-        return this.source;
+    get destination(): AudioNode {
+        if (!this.track) throw new Error("clip is not on a track");
+        return this.track.getAudioNode();
     }
 
-    stop() {
-        this.source.stop();
+    isLoaded() {
+        return this.audio !== null;
     }
 
-    connect(object: Connectable) {
-        // samples cannot store their connections by just connecting the audio node,
-        // because AudioBufferSourceNodes are one-time-use only and have to be reconnected
-        // every time they are used
-        this.connections.push(object);
+    hasFailed() {
+        return this.loadError !== null;
     }
 
-    disconnect(object: Connectable) {
-        this.connections.splice(this.connections.indexOf(object), 1);
+    getPeaks(): Peaks | null {
+        return this.waveform;
+    }
+
+    /** how many beats the clip lasts at the current tempo, counted from where it starts */
+    getDurationBeats(): number {
+        const tempo = globals.engine.transport.tempo;
+        const end = tempo.beatAt(tempo.secondsAt(this.start) + this.durationSeconds);
+        return end - this.start;
     }
 
     getName() {
         return this.name;
+    }
+
+    /** called once the file has loaded (or failed to) */
+    onLoaded(callback: () => void): () => void {
+        this.listeners.add(callback);
+        return () => this.listeners.delete(callback);
+    }
+
+    /** a copy on another track that shares the decoded audio */
+    cloneFor(track: Track): Sample {
+        const copy = Object.create(Sample.prototype) as Sample;
+        Object.assign(copy, {
+            path: this.path,
+            name: this.name,
+            start: this.start,
+            audio: this.audio,
+            waveform: this.waveform,
+            loadError: this.loadError,
+            listeners: new Set(),
+            track: null,
+            loaded: this.loaded,
+        });
+        track.addSample(copy);
+        return copy;
     }
 }

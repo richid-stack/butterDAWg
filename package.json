@@ -26,8 +26,7 @@
   "homepage": "https://github.com/Jaybee18/butterDAWg#readme",
   "dependencies": {
     "electron-squirrel-startup": "^1.0.1",
-    "uuid": "^10.0.0",
-    "wavefile": "^11.0.0"
+    "uuid": "^10.0.0"
   },
   "devDependencies": {
     "@electron-forge/cli": "^7.4.0",
@@ -44,6 +43,7 @@
     "electron": "^45.4.1",
     "electron-reloader": "^1.2.3",
     "esbuild": "^0.28.2",
-    "typescript": "~5.9"
+    "typescript": "~5.9",
+    "wavefile": "^11.0.0"
   }
 }

@@ -1,5 +1,5 @@
 import { Source } from "../src/core/Source";
-import { createElement, cumulativeOffset, globals, ms_to_pixels } from "../src/globals";
+import { createElement, cumulativeOffset, globals } from "../src/globals";
 
 export let audio_graph_nodes: Array<AudioGraphNode> = [];
 

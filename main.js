@@ -23,32 +23,29 @@ function isInside(child, parent) {
 // Resolves a path requested by the renderer (relative to APP_ROOT, or
 // absolute) and refuses anything that ends up outside the readable folders,
 // including through symlinks.
-function resolveReadable(requested) {
+async function resolveReadable(requested) {
     if (typeof requested !== "string") {
         throw new Error("path must be a string");
     }
-    const real = fs.realpathSync(path.resolve(APP_ROOT, requested));
-    const roots = READABLE_ROOTS.filter(r => fs.existsSync(r)).map(r => fs.realpathSync(r));
+    const real = await fs.promises.realpath(path.resolve(APP_ROOT, requested));
+    const roots = [];
+    for (const r of READABLE_ROOTS) {
+        try { roots.push(await fs.promises.realpath(r)); } catch { /* folder missing */ }
+    }
     if (!roots.some(r => isInside(real, r))) {
         throw new Error("path is outside the readable folders: " + requested);
     }
     return real;
 }
 
-// Synchronous handlers, because the existing renderer code reads files
-// synchronously. They only run for the main window, and always answer with
-// { ok, data } or { ok: false, error } so the preload can rethrow errors.
-function handleSync(channel, fn) {
-    ipcMain.on(channel, (event, ...args) => {
+// Every call is asynchronous, so reading a large file never freezes the
+// window, and only answers the main window.
+function handle(channel, fn) {
+    ipcMain.handle(channel, (event, ...args) => {
         if (!mainWindow || event.sender !== mainWindow.webContents) {
-            event.returnValue = { ok: false, error: "untrusted sender" };
-            return;
+            throw new Error("untrusted sender");
         }
-        try {
-            event.returnValue = { ok: true, data: fn(...args) };
-        } catch (err) {
-            event.returnValue = { ok: false, error: err.message };
-        }
+        return fn(...args);
     });
 }
 
@@ -62,6 +59,15 @@ const createWindow = () => {
         contextIsolation: true,
         nodeIntegration: false,
         sandbox: true,
+        // a DAW has to keep time while it is in the background or minimised
+        backgroundThrottling: false,
+        // the audio engine starts the audio context itself
+        autoplayPolicy: 'no-user-gesture-required',
+        // arguments the preload reads (see preload.js)
+        additionalArguments: [
+            '--bdp-root=' + APP_ROOT,
+            ...(process.env.BDP_TEST === '1' ? ['--bdp-test'] : []),
+        ],
       },
         titleBarOverlay: {
             color: '#2f3241',
@@ -79,16 +85,29 @@ const createWindow = () => {
 }
 
 app.whenReady().then(() => {
-    handleSync("app:root", () => APP_ROOT);
-    handleSync("fs:readFile", (p, encoding) => {
-        const real = resolveReadable(p);
-        return encoding ? fs.readFileSync(real, encoding) : fs.readFileSync(real);
+    handle("fs:readFile", async (p) => {
+        const data = await fs.promises.readFile(await resolveReadable(p));
+        // hand over a plain Uint8Array of exactly the file's bytes
+        return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     });
-    handleSync("fs:readdir", (p) => fs.readdirSync(resolveReadable(p)));
-    handleSync("fs:exists", (p) => {
-        try { resolveReadable(p); return true; } catch { return false; }
+    handle("fs:list", async (p) => {
+        const dir = await resolveReadable(p);
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true });
+        const out = [];
+        for (const entry of entries) {
+            let isDirectory = entry.isDirectory();
+            if (entry.isSymbolicLink()) {
+                // follow the link, but only if it stays inside the readable folders
+                try { isDirectory = (await fs.promises.stat(await resolveReadable(path.join(dir, entry.name)))).isDirectory(); }
+                catch { continue; }
+            }
+            out.push({ name: entry.name, isDirectory });
+        }
+        return out;
     });
-    handleSync("fs:isDirectory", (p) => fs.statSync(resolveReadable(p)).isDirectory());
+    handle("fs:exists", async (p) => {
+        try { await resolveReadable(p); return true; } catch { return false; }
+    });
 
     createWindow()
 })

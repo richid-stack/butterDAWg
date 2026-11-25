@@ -5,6 +5,8 @@ import { Playlist } from "./core/Playlist";
 import { Track } from "./core/Track";
 import { TrackComponent } from "./Track";
 import { Channel } from "./core/Channel";
+import { Engine } from "./engine/Engine";
+import { files } from "./platform/files";
 
 class Globals {
 	mixer: Mixer;
@@ -29,19 +31,28 @@ class Globals {
 	// was opened on
 	current_context_track: Track;
 
-	// current progression in the track in ms
-	current_time: number = 0;
-	cursor_pos: number = 0; // in px
-
-	sample_rate: number = 44100;
+	// pixels per beat on the playlist (this changes with the zoom)
 	xsnap: number = 20;
-	bpm: number = 150;
 
-	// audio stuff
-	buffer_size: number = 44100;
-	timeout: number = 10;
-	is_playing: boolean = false;
-	audiocontext: AudioContext = new AudioContext({ sampleRate: this.sample_rate });
+	// the audio engine: the audio context, the transport (position, tempo, loop),
+	// the scheduler that starts clips on time, and the cache of decoded samples
+	engine: Engine = new Engine({ bpm: 150, readBytes: (path) => files.readBytes(path) });
+
+	get audiocontext(): AudioContext {
+		return this.engine.ctx;
+	}
+
+	get bpm(): number {
+		return this.engine.transport.tempo.bpm;
+	}
+
+	set bpm(bpm: number) {
+		this.engine.setBpm(bpm);
+	}
+
+	get is_playing(): boolean {
+		return this.engine.transport.isPlaying;
+	}
 
 	header_help_text: HTMLElement = document.getElementById("header_help_text");
 
@@ -126,23 +137,10 @@ class ReactSubstitution {
 }
 export const React = new ReactSubstitution();
 
-// conversion functions
-//var ms_to_pixels_factor = xsnap*4/8 / (1/(bpm/60000));
-export function pixels_to_ms(px: number) { return px / (globals.xsnap / (1 / (globals.bpm / 60000))); }
-/*
-10 px = 1 beat
-1 beat = 150/60000 = 0.0025 beats/ms
-1 beat / 0.0025 beats/ms = 400 ms
-10 px / 400 = 0.025 px/ms
-=> 10 px / (1 beat / (150 beat/min / 60_000 ms)) = 0.025 px/ms
-*/
-export function ms_to_pixels(ms: number) { return ms * (globals.xsnap / (1 / (globals.bpm / 60000))); }
+// conversion functions: the playlist is laid out in beats, xsnap pixels to a beat
+export function beats_to_px(beats: number) { return beats * globals.xsnap; }
 
-function pixels_to_frames(px: number) { return (44100 * (60 / globals.bpm)) / globals.xsnap * px; }
-
-export function timestamp_to_px(timestamp: number) {return ms_to_pixels(timestamp*1000);}
-
-export function px_to_timestamp(px: number) {return pixels_to_ms(px)/1000;}
+export function px_to_beats(px: number) { return px / globals.xsnap; }
 
 export function snap(x: number) {
 	let space = globals.xsnap;
