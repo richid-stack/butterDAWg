@@ -23,8 +23,12 @@ PASS  rendering a little at a time equals rendering all at once  (largest differ
 PASS  exported float32 WAV holds the rendered audio  (32f, 2ch, 44100 Hz, largest difference 0.0e+0)
 PASS  exported pcm24 WAV holds the rendered audio  (24, 2ch, 44100 Hz, largest difference 6.0e-8)
 PASS  exported pcm16 WAV holds the rendered audio  (16, 2ch, 44100 Hz, largest difference 4.5e-5)
+PASS  a clip that is still loading when it is due joins when it has loaded  (starts 0.42 s in, level 0.500)
+PASS  ...and still ends where the file ends (3 s)  (last sound at 3.000 s)
+PASS  a tempo change does not interrupt or restart a clip that is playing  (largest difference from the ideal tone 3.04e-5 at 2.520 s)
 timing test: looping click for 300 s of real time...
-      scheduled at least 111 ms ahead (0 late); longest stall of the page 32 ms; 0 click(s) off the grid
+      scheduled at least 119 ms ahead (0 late); longest stall of the page 21 ms; 0 click(s) off the grid
+PASS  the scheduler asked for each of 750 clicks at its exact time (largest deviation 0.0000 samples)
 PASS  all 750 clicks of a 300 s loop were heard  (heard 749)
 PASS  clicks stay on the beat (largest error 0.00 samples = 0.000 ms)
 PASS  no drift over 300 s (0.000 samples between the first and last tenth)

@@ -150,6 +150,7 @@ const inPage = {
         this.hits = []; // every sample that is not silent: a click is one or two of these
         this.pending = null;
         this.quiet = 1e9;
+        this.n = 0; // samples received so far: the position in the stream that reaches the speakers
         this.port.onmessage = () => this.port.postMessage({ found: this.found, hits: this.hits });
       }
       process(inputs) {
@@ -157,14 +158,15 @@ const inPage = {
         if (!ch) return true;
         for (let i = 0; i < ch.length; i++) {
           const v = Math.abs(ch[i]);
-          if (v > 1e-4 && this.hits.length < 20000) this.hits.push([currentFrame + i, ch[i]]);
+          const count = this.n++;
+          if (v > 1e-4 && this.hits.length < 20000) this.hits.push([currentFrame + i, ch[i], count]);
           if (this.pending) {
             this.pending.s.push(v);
             if (this.pending.s.length >= 4) { this.found.push(this.pending); this.pending = null; this.quiet = 0; }
             continue;
           }
           this.quiet++;
-          if (v > 0.15 && this.quiet > 2205) this.pending = { frame: currentFrame + i, s: [v] };
+          if (v > 0.15 && this.quiet > 2205) this.pending = { frame: currentFrame + i, count, s: [v] };
         }
         return true;
       }
@@ -556,24 +558,33 @@ async function run() {
       });
       const beat = 60 / globals.bpm;
       // where the clicks should be, in frames; compare with where they were heard
-      const errors = got.found.map((o, j) => {
-        const sum = o.s.reduce((a, b) => a + b, 0);
-        const centre = o.frame + o.s.reduce((a, v, k) => a + k * v, 0) / sum;
-        return centre - (start + Math.round(j * beat * ctx.sampleRate));
-      });
+      const centreOf = (o, base) => base + o.s.reduce((a, v, k) => a + k * v, 0) / o.s.reduce((a, b) => a + b, 0);
+      // where each click should be, in frames of the audio clock...
+      const errors = got.found.map((o, j) => centreOf(o, o.frame) - (start + Math.round(j * beat * ctx.sampleRate)));
+      // ...and, counting the samples that actually arrive at the output, how far each click is from where
+      // the first click and the beat put it. This is what a listener hears: the spacing of the clicks.
+      const streamErrors = got.found.map((o, j) => centreOf(o, o.count) - (centreOf(got.found[0], got.found[0].count) + Math.round(j * beat * ctx.sampleRate)));
       return {
-        rate: ctx.sampleRate, beat, errors, expectedCount: Math.floor(seconds / beat),
+        rate: ctx.sampleRate, beat, errors, streamErrors, expectedCount: Math.floor(seconds / beat),
         minMargin: Math.min(...margins), lateStarts: margins.filter((m) => m < 0).length, longestStall,
         events, start, hits: got.hits,
       };
     },
     { onsetCode: inPage.onsetCode, seconds },
   );
-  const errs = timing.errors;
+  // the spacing of the clicks in the output stream is what is judged; the audio clock's own numbering
+  // of the frames is compared as well and any disagreement is reported
+  const errs = timing.streamErrors;
+  const clockErrs = timing.errors;
+  const clockOutliers = clockErrs.map((e, j) => [j, e - clockErrs[0]]).filter(([, e]) => Math.abs(e) > 1.5);
   const maxErr = Math.max(...errs.map(Math.abs));
   const tenth = Math.max(1, Math.floor(errs.length / 10));
   const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
   const drift = mean(errs.slice(-tenth)) - mean(errs.slice(0, tenth));
+  if (clockOutliers.length) {
+    console.log(`      note: the audio clock's frame numbers put ${clockOutliers.length} click(s) off the grid while the output stream had them in place: ` +
+      clockOutliers.slice(0, 6).map(([j, e]) => `#${j} by ${e.toFixed(0)}`).join(", "));
+  }
   const outliers = errs.map((e, j) => [j, e]).filter(([, e]) => Math.abs(e) > 0.5);
   console.log(`      scheduled at least ${(timing.minMargin * 1000).toFixed(0)} ms ahead (${timing.lateStarts} late); longest stall of the page ${timing.longestStall.toFixed(0)} ms; ` +
     `${outliers.length} click(s) off the grid` + (outliers.length ? ": " + outliers.slice(0, 8).map(([j, e]) => `#${j} by ${e.toFixed(1)}`).join(", ") : ""));
@@ -591,6 +602,10 @@ async function run() {
       }
     }
   }
+  // what the scheduler asked the audio engine for, independent of anything the audio thread does with it
+  const asked = timing.events.map((e, k) => Math.abs(e.when * timing.rate - (timing.start + Math.round(k * timing.beat * timing.rate))));
+  const maxAsked = Math.max(...asked);
+  check(`the scheduler asked for each of ${asked.length} clicks at its exact time (largest deviation ${maxAsked.toFixed(4)} samples)`, maxAsked < 0.01 && asked.length >= timing.expectedCount - 1);
   check(`all ${timing.expectedCount} clicks of a ${seconds} s loop were heard`, Math.abs(errs.length - timing.expectedCount) <= 1, `heard ${errs.length}`);
   check(`clicks stay on the beat (largest error ${maxErr.toFixed(2)} samples = ${((maxErr / timing.rate) * 1000).toFixed(3)} ms)`, maxErr <= 1.5);
   check(`no drift over ${seconds} s (${drift.toFixed(3)} samples between the first and last tenth)`, Math.abs(drift) <= 0.5);

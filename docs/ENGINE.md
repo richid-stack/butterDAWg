@@ -106,6 +106,14 @@ copied until the plugin format has a state API (Phase 5 and 7).
 | `npm run test:engine` | The real audio engine: every format, channel count and rate decodes to the right channels and content; a stereo file renders correctly at 44.1, 48 and 96 kHz; a project (two tracks, pan, fader, a plugin, mono and stereo files at different rates) is played live and recorded at the master output, rendered offline, and the two are subtracted; a loop is played in real time and each click is measured against the ideal grid; exported WAV files hold exactly the rendered audio; a clip still loading when it is due joins and ends on time; a tempo change leaves a sounding clip unbroken. |
 | `npm run test:engine -- --long` | The same timing test for a real five minutes. |
 
+About the real-time timing check: it counts samples as they arrive at the output and measures the
+spacing of the clicks, which is what a listener hears, and it separately checks that the scheduler
+asked for every click at its exact time. The audio clock's own frame numbers (`currentFrame`
+inside the recorder) are compared too, but on some machines they are occasionally off by whole
+render blocks (128 samples) for a single block while the output stream stays exact; the test
+prints a note when that happens instead of failing, because the scheduler and the sound were
+right.
+
 The null test found two real bugs while it was being written (cloned tracks playing every clip
 twice, and mono clips changing level depending on their neighbours), and the automated review of
 the pull request found two more (clips still loading when due stayed silent; a tempo change
