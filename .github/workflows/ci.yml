@@ -24,6 +24,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Unit tests
+        run: npm test
+
       - name: Build
         run: npm run build
 
@@ -35,6 +38,11 @@ jobs:
 
       - name: Smoke test (drives the real app)
         run: xvfb-run -a -s "-screen 0 1800x1000x24" node scripts/smoke.cjs ci-smoke
+
+      - name: Audio engine test (real playback against the offline render, file formats, timing)
+        run: |
+          sudo apt-get install -y ffmpeg
+          xvfb-run -a -s "-screen 0 1800x1000x24" node scripts/engine-test.cjs
 
       - name: Keep the screenshot
         if: always()

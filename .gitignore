@@ -130,3 +130,8 @@ _ideas
 built
 
 ideas/
+
+# unit tests are bundled here, and the integration tests write generated audio here
+.test-build/
+files/.test/
+

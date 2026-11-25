@@ -1,27 +1,32 @@
-import { WaveFile } from "wavefile";
 import { globals, Draggable, sidebar_folder_colors, insertAfter } from "./globals";
-import { readFileSync } from "fs";
+import { files } from "./platform/files";
+import { isAudioFile } from "./engine/AudioLoader";
+import { SampleSource } from "./core/Sample";
 
-export class Item extends Draggable {
+// One row of the sidebar: a folder, an audio file or some other file. Folders
+// list their contents when they are opened, so a big library costs nothing
+// until you look inside it. Audio files can be dragged onto the playlist.
 
-	file: WaveFile;
-	contents: string | Map<string, string>;
+export class Item extends Draggable implements SampleSource {
+	/** where the file or folder is */
+	readonly path: string;
+	readonly isDirectory: boolean;
+	readonly isAudio: boolean;
 	active: boolean;
 	indent: number;
 	children: Array<Item>;
 	title: string;
-	depth: string;
-	depth_max: number;
+	private opening = false;
 
-	constructor(title: string, contents: string | Map<string, string>, indent = 0) {
+	constructor(title: string, path: string, isDirectory: boolean, indent = 0) {
 		super();
-		this.file = null;
-		this.contents = contents;
+		this.path = path;
+		this.isDirectory = isDirectory;
+		this.isAudio = !isDirectory && isAudioFile(title);
 		this.active = false;
 		this.indent = indent;
 		this.children = [];
 		this.title = title;
-		this.depth_max = 1.0;
 
 		// construct container
 		var a = document.createElement("div");
@@ -31,20 +36,20 @@ export class Item extends Draggable {
 		a.style.paddingLeft = indent * globals.palette_indent_width + "px";
 		this.element = a;
 		// add icon
-		// TODO display a little loading circle while the sample is being loaded in, when the user opens a folder
-		var ending = title.split(".").pop();
-		if (ending === "wav") {
-			var type_icon = document.createElement("i");
+		var type_icon = document.createElement("i");
+		if (this.isAudio) {
 			type_icon.classList.add("fa-solid");
 			type_icon.classList.add("fa-file-audio");
-			this.loadData();
 			this.initializeDragListener();
-		} else if (title === ending) {
-			var type_icon = document.createElement("i");
+			// start reading and decoding the file when the mouse goes down on it,
+			// so that it is ready by the time it is dropped on the playlist
+			a.addEventListener("mousedown", () => {
+				globals.engine.samples.load(this.path).catch((err) => console.error("could not load " + this.path, err));
+			});
+		} else if (isDirectory) {
 			type_icon.classList.add("fa-regular");
 			type_icon.classList.add("fa-folder");
 		} else {
-			var type_icon = document.createElement("i");
 			type_icon.classList.add("fa-solid");
 			type_icon.classList.add("fa-file");
 		}
@@ -52,38 +57,15 @@ export class Item extends Draggable {
 		// add text object
 		var b = document.createElement("div");
 		b.classList.add("sidebar_item_lvl1_text");
-		b.innerHTML = title;
+		b.textContent = title;
 		a.appendChild(b);
 
 		this.initializeEventListeners();
 	}
 
-	loadData() {
-		// Load a wav file buffer as a WaveFile object
-		this.file = new WaveFile(readFileSync(<string> this.contents));
-		if (this.file.bitDepth !== "32f") {
-			this.file.toBitDepth("32f");
-		}
-		this.depth = this.file.bitDepth;
-	}
-
-	getData() {
-		return this.file.getSamples(true);
-	}
-
-	getWidth() {
-		// returns the sample size in frames as an integer
-		return this.file.chunkSize;
-	}
-
-	getDuration() {
-		// returns duration in seconds
-		return this.getData().length / globals.sample_rate / 2;
-	}
-
 	initializeEventListeners() {
 		this.element.addEventListener("click", () => {
-			if (this.contents === undefined) { return; }
+			if (!this.isDirectory) { return; }
 			if (this.active) {
 				this.active = false;
 				this.close();
@@ -99,10 +81,6 @@ export class Item extends Draggable {
 	}
 
 	close() {
-		if (this.contents === undefined) {
-			this.element.remove();
-			return;
-		}
 		this.children.forEach(item => {
 			item.close();
 			item.remove();
@@ -110,14 +88,29 @@ export class Item extends Draggable {
 		this.children = [];
 	}
 
-	open() {
-		// if this item is a folder, open it
-		if (this.contents === undefined) { return; }
-		(<Map<string, string>> this.contents).forEach((element, key) => {
-			var a = new Item(key, element, this.indent + 1);
-			a.appendAfter(this.element);
-			this.children.push(a);
-		});
+	/** lists the folder and adds a row for each file in it that is worth showing */
+	async open() {
+		if (!this.isDirectory || this.opening) { return; }
+		this.opening = true;
+		try {
+			const entries = await files.list(this.path);
+			// the folder may have been closed again while it was being listed
+			if (!this.active) { return; }
+			// each row goes after the previous one, so the folder's order is kept
+			let previous = this.element;
+			for (const entry of entries) {
+				// hidden files (".DS_Store", ".gitkeep") are not for the user
+				if (entry.name[0] === ".") { continue; }
+				const item = new Item(entry.name, this.path + "/" + entry.name, entry.isDirectory, this.indent + 1);
+				item.appendAfter(previous);
+				previous = item.element;
+				this.children.push(item);
+			}
+		} catch (err) {
+			console.error("could not open " + this.path, err);
+		} finally {
+			this.opening = false;
+		}
 	}
 
 	remove() {

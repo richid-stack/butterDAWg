@@ -6,7 +6,8 @@
 // paths outside its folders, that a plugin can be added and opened from the
 // mixer (this exercises the CSP: plugin worklets load from blob URLs and plugin
 // hosts are eval'd), and that a sample can be dragged from the browser into the
-// playlist (this reads the file through the bridge). Any console error or
+// playlist (this reads the file through the bridge), and that the play, stop and
+// space controls drive the engine. Any console error or
 // uncaught exception during the run fails the test.
 //
 // Needs Playwright (the Electron driver only, no browsers): `playwright` or `playwright-core`.
@@ -30,7 +31,7 @@ function check(name, ok, detail = "") {
 
 (async () => {
   // Electron rejects some NODE_OPTIONS that sandboxes set for their network proxy
-  const env = { ...process.env };
+  const env = { ...process.env, BDP_NO_RELOAD: "1" };
   delete env.NODE_OPTIONS;
 
   const app = await _electron.launch({
@@ -69,19 +70,21 @@ function check(name, ok, detail = "") {
   check("bridge is exposed", world.bridge === "object");
 
   // --- file bridge -------------------------------------------------------
-  const plugins = await page.evaluate(() => window.bridge.fs.readdir("plugins"));
+  const plugins = (await page.evaluate(() => window.bridge.fs.list("plugins"))).map((e) => e.name);
   check("bridge lists the plugins folder", plugins.includes("Gain.bdp"), plugins.join(", "));
 
-  const denied = await page.evaluate(() => {
+  const denied = await page.evaluate(async () => {
     const tries = ["package.json", "/etc/passwd", "plugins/../package.json"];
-    return tries.map((p) => {
-      try {
-        window.bridge.fs.readFile(p);
-        return p + " -> READ";
-      } catch (e) {
-        return /outside the readable folders|ENOENT/.test(e.message) ? "refused" : p + " -> " + e.message;
-      }
-    });
+    return Promise.all(
+      tries.map(async (p) => {
+        try {
+          await window.bridge.fs.readFile(p);
+          return p + " -> READ";
+        } catch (e) {
+          return /outside the readable folders|ENOENT/.test(e.message) ? "refused" : p + " -> " + e.message;
+        }
+      }),
+    );
   });
   check("bridge refuses paths outside files/ and plugins/", denied.every((d) => d === "refused"), denied.join("; "));
 
@@ -122,6 +125,41 @@ function check(name, ok, detail = "") {
   await page.waitForTimeout(800);
   const after = await page.screenshot({ clip: row });
   check("dragged sample appears on the track (read through the bridge)", !before.equals(after));
+
+  // --- play and stop -----------------------------------------------------
+  // the header's play button starts the engine; the time label and the
+  // playlist cursor follow it; stop goes back to the start
+  const label = page.locator(".header_time > label");
+  const cursorLeft = () => page.locator(".bars_cursor").evaluate((el) => parseFloat(el.style.left));
+  const cursorBefore = await cursorLeft();
+  await page.locator(".play").click();
+  await page.waitForTimeout(1500);
+  const playing = await page.evaluate(() => ({
+    isPlaying: window.__bdp ? window.__bdp.globals.is_playing : null,
+    icon: document.querySelector(".play i").className,
+  }));
+  const timeWhilePlaying = (await label.textContent()).trim();
+  const cursorWhilePlaying = await cursorLeft();
+  check("play button starts playback and shows pause", /fa-pause/.test(playing.icon), playing.icon);
+  check("time label follows playback", timeWhilePlaying !== "00:00.00" && /^\d\d:\d\d\.\d\d$/.test(timeWhilePlaying), timeWhilePlaying);
+  check("playlist cursor moves while playing", cursorWhilePlaying > cursorBefore + 20, `${cursorBefore} -> ${cursorWhilePlaying}`);
+  await page.locator(".reset").click();
+  await page.waitForTimeout(300);
+  const timeAfterStop = (await label.textContent()).trim();
+  const cursorAfterStop = await cursorLeft();
+  const iconAfterStop = await page.locator(".play i").getAttribute("class");
+  check("stop goes back to the start", timeAfterStop === "00:00.00" && Math.abs(cursorAfterStop - cursorBefore) < 1 && /fa-play/.test(iconAfterStop), `${timeAfterStop}, cursor ${cursorAfterStop}`);
+
+  // space plays and pauses (the key goes to the playlist window)
+  await page.locator(".tracks_canvas").first().click({ position: { x: 600, y: 300 } });
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(600);
+  const spacePlaying = await page.locator(".play i").getAttribute("class");
+  await page.keyboard.press("Space");
+  await page.waitForTimeout(300);
+  const spacePaused = await page.locator(".play i").getAttribute("class");
+  check("space bar plays and pauses", /fa-pause/.test(spacePlaying) && /fa-play/.test(spacePaused), `${spacePlaying} / ${spacePaused}`);
+  await page.locator(".reset").click();
 
   if (shotName) {
     const out = path.join(root, "docs", "progress", shotName + ".png");

@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, lstatSync } from "fs";
 import { globals } from "../globals";
+import { files } from "../platform/files";
 import { Item } from "../PaletteItem";
 
 // palette functionality
@@ -21,34 +21,16 @@ export function loadPalette() {
 		drag_container.style.transform = "rotateZ(" + e.movementX + "deg)";
 	});
 
-	function mapFolder(folder: string) {
-		if (!existsSync(folder)) {
-			console.log("couldn't read palette input folder");
-			return new Map([["", ""]]);
-		}
-		// if 'folder' is a file, only return the file
-		// aka arrived at the deepest possible recursion in the folder
-		if (lstatSync(folder).isFile()) {
-			if (folder[0] === ".") {
-				return null; // has to be null !
+	// the top level of the sidebar is the app's own "files" folder; folders
+	// below it are listed when they are opened
+	const root = files.root + "/files";
+	files.list(root).then(
+		(entries) => {
+			for (const entry of entries) {
+				if (entry.name[0] === ".") { continue; }
+				new Item(entry.name, root + "/" + entry.name, entry.isDirectory).appendToSidebar();
 			}
-			return folder;
-		}
-		// 'folder' is a folder, recursively map the remaining contents
-		let res: Map<string, string> = new Map();
-		var filenames = readdirSync(folder);
-		filenames.forEach(file => {
-			let content = mapFolder(folder + "/" + file);
-			if (content !== null) {
-				res.set(file, <string>content);
-			}
-		});
-		return res;
-	}
-	let hirachy = <Map<string, string>>mapFolder(window.bridge.appRoot + "/files");
-
-	hirachy.forEach((element, key) => {
-		var a = new Item(key, element);
-		a.appendToSidebar();
-	});
+		},
+		(err) => console.error("couldn't read the palette folder", err),
+	);
 }

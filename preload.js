@@ -3,20 +3,21 @@
 // The main process (main.js) does the real work and decides what is allowed.
 const { contextBridge, ipcRenderer } = require("electron");
 
-function call(channel, ...args) {
-    const result = ipcRenderer.sendSync(channel, ...args);
-    if (!result.ok) {
-        throw new Error(result.error);
-    }
-    return result.data;
-}
+// main.js passes these as command-line arguments of the page
+const arg = (name) => {
+    const prefix = "--" + name + "=";
+    const hit = process.argv.find((a) => a.startsWith(prefix));
+    return hit ? hit.slice(prefix.length) : undefined;
+};
 
 contextBridge.exposeInMainWorld("bridge", {
-    appRoot: call("app:root"),
+    appRoot: arg("bdp-root"),
+    // true only when the test scripts start the app (BDP_TEST=1); the app then
+    // exposes its engine on window.__bdp so tests can drive it
+    testMode: process.argv.includes("--bdp-test"),
     fs: {
-        readFile: (path, encoding) => call("fs:readFile", path, encoding),
-        readdir: (path) => call("fs:readdir", path),
-        exists: (path) => call("fs:exists", path),
-        isDirectory: (path) => call("fs:isDirectory", path),
+        readFile: (path) => ipcRenderer.invoke("fs:readFile", path),
+        list: (path) => ipcRenderer.invoke("fs:list", path),
+        exists: (path) => ipcRenderer.invoke("fs:exists", path),
     },
 });

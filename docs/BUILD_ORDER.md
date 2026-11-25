@@ -46,18 +46,28 @@ Status: **done** on branch `phase-1-foundation`. Typecheck is clean, the smoke t
 
 Goal: timing and signal path you can trust.
 
-- [ ] New `src/engine/Transport.ts`: stopped, playing and paused states; position in beats and seconds; loop region; tempo map. Replace the context suspend/resume logic in `Playlist.play()` and `Playlist.stop()`.
-- [ ] New `src/engine/Scheduler.ts`: lookahead timer using `audioContext.currentTime`, scheduling clips and notes just ahead of the playhead. Replace the start-everything-at-once loop in `Track.play()`.
-- [ ] Replace millisecond time (`globals.current_time`) with beats; update `pixels_to_ms` and related helpers in `src/globals.ts`.
-- [ ] `src/globals.ts`: stop forcing `sampleRate: 44100`; follow the device rate.
-- [ ] Rework `src/core/Source.ts` and `src/core/Sample.ts`: decode with the browser decoder, use the real channel count and sample rate, remove the 2× rate hack, support WAV, MP3, FLAC and OGG, cache waveform peaks.
-- [ ] `src/core/Mixer.ts` and `src/core/Channel.ts`: route channels into the master channel, then the master into the speakers. Use `StereoPannerNode`. Map faders in dB. Add peak and RMS meters.
-- [ ] Rebuild the plugin chain from a list instead of disconnecting and reconnecting neighbours (`Channel.addPlugin`). Add a bypass flag.
-- [ ] Offline render path (`OfflineAudioContext`) that builds the same graph, plus a WAV writer for 16-bit, 24-bit and 32-bit float using `wavefile`.
-- [ ] Move the bridge's file reads from synchronous to asynchronous, behind a `FileService` interface that a browser shell can implement later.
-- [ ] Tests: scheduler timing maths, a render-versus-playback null test, and a stereo file test.
+- [x] New `src/engine/Transport.ts`: stopped, playing and paused states; position in beats and seconds; loop region; tempo map. Replaces the context suspend/resume logic that `Playlist.play()` and `Playlist.stop()` used.
+- [x] New `src/engine/Scheduler.ts`: lookahead timer using `audioContext.currentTime`, scheduling clips and notes just ahead of the playhead. Replace the start-everything-at-once loop in `Track.play()`.
+- [x] Replace millisecond time (`globals.current_time`) with beats; update `pixels_to_ms` and related helpers in `src/globals.ts`.
+- [x] `src/globals.ts`: stop forcing `sampleRate: 44100`; follow the device rate.
+- [x] Rework `src/core/Source.ts` and `src/core/Sample.ts`: decode with the browser decoder, use the real channel count and sample rate, remove the 2× rate hack, support WAV, MP3, FLAC and OGG, cache waveform peaks.
+- [x] `src/core/Mixer.ts` and `src/core/Channel.ts`: route channels into the master channel, then the master into the speakers. Use `StereoPannerNode`. Map faders in dB. Add peak and RMS meters.
+- [x] Rebuild the plugin chain from a list instead of disconnecting and reconnecting neighbours (`Channel.addPlugin`). Add a bypass flag.
+- [x] Offline render path (`OfflineAudioContext`) that builds the same graph, plus a WAV writer for 16-bit, 24-bit and 32-bit float using `wavefile`.
+- [x] Move the bridge's file reads from synchronous to asynchronous, behind a `FileService` interface that a browser shell can implement later.
+- [x] Tests: scheduler timing maths, a render-versus-playback null test, and a stereo file test.
 
 Done when: a five-minute loop plays without audible drift, the rendered WAV matches playback, and stereo files at any sample rate play correctly.
+
+Phase 2 notes (what was built, and what was left on purpose):
+
+- The engine is in `src/engine/` and described in `docs/ENGINE.md`. The Phase 2 gate is checked by `npm test` (unit tests with a fake clock, including a five-minute loop) and `npm run test:engine` (the real app: file decoding, stereo at any rate, render-versus-playback null test, real-time timing, WAV export). `npm run test:engine -- --long` plays a looping click for a real five minutes.
+- A mono file is up-mixed to stereo at the same level in both channels (see `engine/nodes.ts`). Before this, a mono clip's level depended on whether a stereo clip was on the same track; the null test found it.
+- The pan law is the Web Audio stereo law: centre is unchanged, and a hard-panned stereo file keeps its image. A selectable pan law (0, -3, -4.5, -6 dB) is a mixer setting for Phase 4.
+- The master channel exists in the audio graph and is a normal channel, but the Mixer window's master strip is still the old static drawing. It is wired in Phase 4 with the mixer routing work.
+- A track that is not routed to a channel is silent. The default project routes track 0 to channel 0 (as before); routing UI comes with the project model in Phase 3.
+- Plugins are copied into the offline render by their parameter values only. Plugins with internal state (a delay's buffer, a sampler's zones) need the `.bdp` state API from Phase 5 and 7.
+- Waveforms are now drawn from min/max peaks, so they look slightly different from the old sine-warped line.
 
 ## Phase 3: Project model
 

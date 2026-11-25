@@ -1,5 +1,6 @@
 import { Window } from "../misc/window";
-import { readdirSync } from "fs";
+import { files } from "../../platform/files";
+import { loadPluginModule } from "../../core/Plugin";
 import { Source } from "../../core/Source";
 import { AudioGraphAnalyzerNode, AudioGraphOutputNode, AudioGraphSourceNode, PluginNode } from "../../../AudioGraph/main";
 import { globals } from "../../globals";
@@ -17,11 +18,12 @@ export class AudioGraphWindow extends Window {
             </div>");
 
         // first load all possible audio plugins, then initialise some testing audio nodes
-        let plugin_promises = readdirSync("plugins").map((v) => {
-            return globals.audiocontext.audioWorklet.addModule("plugins/" + v + "/plugin.js");
-        });
-        Promise.allSettled(plugin_promises).then(() => {
-            let source = new Source("./files/0Current project/kick7.1.wav");
+        files.list("plugins").then((entries) => {
+            return Promise.allSettled(
+                entries.filter((e) => e.isDirectory).map((e) => loadPluginModule(globals.audiocontext, "plugins/" + e.name)),
+            );
+        }).then(async () => {
+            let source = await Source.load("files/samples/kick7.1.wav");
             let node1 = new AudioGraphSourceNode(source);
             //let node4 = new PluginNode(new Plugin(""));
             //let node5 = new PluginNode(new Plugin("AudioNodes/bitcrusher.js"));

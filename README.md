@@ -32,11 +32,15 @@ Other commands:
 ```
 npm run typecheck     # TypeScript check, no output files
 npm run build         # bundle the renderer only
-npm run smoke         # drive the real app: plugins, sample drag-and-drop, offline, no errors
+npm test              # unit tests: tempo maths, transport, scheduler, WAV writer, peaks
+npm run smoke         # drive the real app: plugins, sample drag-and-drop, play and stop, offline, no errors
+npm run test:engine   # the real audio engine: file formats, stereo, render-versus-playback null test, timing
+                      # (add -- --long for a real five-minute timing run)
 npm run shot -- name  # screenshot to docs/progress/name.png
 ```
-`smoke` and `shot` need `xvfb` (and ImageMagick for `shot`) on Linux; `smoke` also needs the
-`playwright` or `playwright-core` package. Electron 45 downloads its binary the first time it
+`smoke`, `test:engine` and `shot` need `xvfb` (and ImageMagick for `shot`) on Linux; the two tests
+also need the `playwright` or `playwright-core` package, and `test:engine` uses `ffmpeg` if it is
+installed (to make MP3, FLAC and OGG test files). Electron 45 downloads its binary the first time it
 runs; `node node_modules/electron/install.js` fetches it up front.
 
 The renderer runs sandboxed with no Node access; it reads files only through the bridge in
