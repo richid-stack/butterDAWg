@@ -69,6 +69,18 @@ test("transport: position follows the clock, pauses and seeks", () => {
     close(tr.position, 1); // back to where it was seeked to
 });
 
+test("transport: playAt starts at an exact clock time, whatever the clock says now", () => {
+    const clock = new FakeClock();
+    const tr = new Transport(clock, new TempoMap(120));
+    clock.time = 10.123;
+    tr.playAt(11);
+    close(tr.position, 0); // waits at the start until the start time comes
+    clock.time = 12;
+    close(tr.position, 2); // one second after the start
+    tr.stop();
+    close(tr.position, 0);
+});
+
 test("transport: a tempo change mid-playback does not move the position", () => {
     const clock = new FakeClock();
     const tr = new Transport(clock, new TempoMap(120));

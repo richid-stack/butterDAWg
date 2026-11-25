@@ -92,10 +92,18 @@ export class Transport {
 
     /** Starts playing from the current position, `delay` seconds from now. */
     play(delay = 0): void {
+        this.playAt(this.clock.now() + delay);
+    }
+
+    /**
+     * Starts playing from the current position at an exact clock time, for
+     * starts that have to line up with something else (a recording, a test).
+     */
+    playAt(time: number): void {
         if (this._state === "playing") return;
         if (this._state === "stopped") this.returnBeat = this.restBeat;
         this.anchorBeat = this.restBeat;
-        this.anchorTime = this.clock.now() + delay;
+        this.anchorTime = time;
         this._state = "playing";
         this.changed(true);
     }

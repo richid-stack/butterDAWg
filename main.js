@@ -2,9 +2,14 @@ const { app, BrowserWindow, ipcMain } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
-try {
-    require("electron-reloader")(module);
-} catch (_) {}
+// Reload the window when a file changes, while developing. It is a dev
+// dependency, so packaged builds do not have it; the tests turn it off because
+// a reload in the middle of a run would throw the run away.
+if (process.env.BDP_TEST !== "1" && process.env.BDP_NO_RELOAD !== "1") {
+    try {
+        require("electron-reloader")(module);
+    } catch (_) {}
+}
 
 // The folder that holds index.html (inside the asar archive when packaged).
 const APP_ROOT = __dirname;

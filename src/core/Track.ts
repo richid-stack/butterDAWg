@@ -1,6 +1,7 @@
 import { Color } from "../ui/misc/Color";
 import { Connectable, globals } from "../globals";
 import { Sample } from "./Sample";
+import { stereoGain } from "../engine/nodes";
 
 // A playlist track holds clips. All its clips play into one node, which goes to
 // one mixer channel. The track does not play anything itself; the scheduler
@@ -25,7 +26,7 @@ export class Track implements Connectable {
         this.title = "";
         this.color = new Color("#646e73");
 
-        this.audionode = new GainNode(ctx);
+        this.audionode = stereoGain(ctx);
     }
 
     isActive() {
@@ -85,7 +86,8 @@ export class Track implements Connectable {
             const target = route(this.target);
             if (target) copy.connect(target);
         }
-        for (const sample of this.samples) copy.addSample(sample.cloneFor(copy));
+        // (cloneFor puts the copy on the track itself)
+        for (const sample of this.samples) sample.cloneFor(copy);
         return copy;
     }
 }

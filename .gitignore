@@ -129,4 +129,9 @@ dist
 _ideas
 built
 
-ideas/.test-build/
+ideas/
+
+# unit tests are bundled here, and the integration tests write generated audio here
+.test-build/
+files/.test/
+

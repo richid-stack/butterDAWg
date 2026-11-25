@@ -1,5 +1,6 @@
 import { Connectable, globals } from "../globals";
 import { peakOf, rmsOf } from "../engine/dsp";
+import { stereoGain } from "../engine/nodes";
 import { Plugin } from "./Plugin";
 
 // A mixer channel. The sound path is
@@ -26,7 +27,7 @@ export class Channel implements Connectable {
 
     constructor(ctx: BaseAudioContext = globals.audiocontext, destination: AudioNode = ctx.destination) {
         this.ctx = ctx;
-        this.input = new GainNode(ctx);
+        this.input = stereoGain(ctx);
         this.plugins = Array.from({ length: PLUGIN_SLOTS }, (): Plugin => null);
         // equal-power panning: the centre is not louder or quieter than the sides
         this.panner = new StereoPannerNode(ctx);
@@ -82,6 +83,11 @@ export class Channel implements Connectable {
 
     getAudioNode(): AudioNode {
         return this.input;
+    }
+
+    /** where the channel's finished sound leaves it (for meters and recorders to listen to) */
+    getOutputNode(): AudioNode {
+        return this.output;
     }
 
     getPlugins() {

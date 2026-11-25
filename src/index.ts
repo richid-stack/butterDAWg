@@ -21,7 +21,7 @@ loadPalette();
 
 //let playlist = new Playlist();
 import { MixerWindow } from "./ui/windows/MixerWindow";
-import { loadPluginModule } from "./core/Plugin";
+import { loadPluginModule, Plugin } from "./core/Plugin";
 import { Sample } from "./core/Sample";
 import { renderProject } from "./core/renderProject";
 import { encodeWav } from "./engine/Wav";
@@ -90,5 +90,5 @@ globals.playlist.getTracks()[0].connect(globals.mixer.getChannels()[0]);
 
 // hooks for the automated tests (only present when the app is started in test mode)
 if (window.bridge.testMode) {
-	(window as any).__bdp = { globals, Sample, renderProject, encodeWav };
+	(window as any).__bdp = { globals, Sample, Plugin, renderProject, encodeWav };
 }

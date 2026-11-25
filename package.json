@@ -12,7 +12,8 @@
     "shot": "bash scripts/shot.sh",
     "package": "npm run build && electron-forge package",
     "make": "npm run build && electron-forge make",
-    "smoke": "xvfb-run -a node scripts/smoke.cjs"
+    "smoke": "xvfb-run -a node scripts/smoke.cjs",
+    "test:engine": "xvfb-run -a node scripts/engine-test.cjs"
   },
   "repository": {
     "type": "git",

@@ -4,6 +4,8 @@ import { SchedulableClip, SchedulerHost, StartEvent } from "./Scheduler";
 // clip play, with a small gain node so it can be faded out instead of cut (a
 // hard cut at a non-zero sample is a click).
 
+import { stereoGain } from "./nodes";
+
 export interface PlayableClip extends SchedulableClip {
     /** null while the file is still loading; such clips are skipped */
     readonly buffer: AudioBuffer | null;
@@ -45,7 +47,7 @@ export class Voices implements SchedulerHost<PlayableClip> {
         if (offset >= buffer.duration) return;
 
         const source = new AudioBufferSourceNode(this.ctx, { buffer });
-        const gain = new GainNode(this.ctx);
+        const gain = stereoGain(this.ctx);
         source.connect(gain);
         gain.connect(event.clip.destination);
         source.start(when, offset);
