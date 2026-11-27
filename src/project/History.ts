@@ -40,6 +40,7 @@ export class History {
     private forcedDirty = false;
     private listeners = new Set<() => void>();
     private busy = false;
+    private count = 0;
     private readonly limit: number;
     private readonly coalesceMs: number;
     private readonly now: () => number;
@@ -59,6 +60,11 @@ export class History {
     record(command: Command): void {
         this.guard();
         this.push(command);
+    }
+
+    /** goes up by one every time anything in the history changes (autosave uses it to know whether there is anything new) */
+    get revision(): number {
+        return this.count;
     }
 
     canUndo(): boolean {
@@ -179,6 +185,7 @@ export class History {
     }
 
     private changed(): void {
+        this.count++;
         this.listeners.forEach((cb) => cb());
     }
 }

@@ -1,0 +1,154 @@
+/* the FILE and EDIT drop-down menus, the modal dialog and the inline name editor */
+
+/* the menu bar entries can be pressed */
+.header_menu > div {
+    cursor: pointer;
+}
+
+.header_menu > div.menu_open {
+    background-color: var(--bg-medium);
+}
+
+/* drop-down menus use the context menu look, a little wider */
+.context_menu.menu_dropdown {
+    width: 230px;
+    display: block;
+}
+
+.menu_dropdown .context_item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-right: 8px;
+}
+
+.menu_dropdown .context_item .shortcut {
+    color: #626a6f;
+    font-size: 10px;
+    margin-left: 12px;
+}
+
+.menu_dropdown .context_item:hover .shortcut {
+    color: #d9dfe5;
+}
+
+.menu_dropdown .context_item.disabled {
+    color: #7d858a;
+    cursor: default;
+    pointer-events: none;
+}
+
+.menu_dropdown .context_item.has_sub::after {
+    content: "\25B8";
+    margin-left: 8px;
+}
+
+.menu_dropdown .context_item.has_sub > .menu_sub {
+    display: none;
+    position: absolute;
+    left: 100%;
+    top: -4px;
+    width: 230px;
+    padding: 0 5px;
+    background: #bec2c5;
+    border: solid 2px black;
+}
+
+.menu_dropdown .context_item.has_sub:hover > .menu_sub {
+    display: block;
+}
+
+.menu_dropdown .context_item .menu_empty {
+    color: #626a6f;
+}
+
+/* rename in place */
+input.inline_edit {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    color: var(--bg-darker);
+    background: #d9dfe5;
+    border: 1px solid var(--menu-border);
+    padding: 0 2px;
+    user-select: text;
+}
+
+/* modal dialog */
+.dialog_overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #181e2299;
+}
+
+.dialog_box {
+    min-width: 320px;
+    max-width: 480px;
+    padding: 14px 16px;
+    background: var(--bg-dark);
+    border: 1px solid var(--menu-border);
+    box-shadow: 0 6px 24px #000000aa;
+    color: var(--text-color);
+    font-size: 13px;
+}
+
+.dialog_title {
+    font-size: 14px;
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.dialog_message {
+    line-height: 1.4;
+    user-select: text;
+}
+
+.dialog_details {
+    margin-top: 8px;
+    padding: 6px 8px;
+    max-height: 160px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+    font-size: 11px;
+    background: var(--bg-darker);
+    user-select: text;
+}
+
+.dialog_buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.dialog_button {
+    font: inherit;
+    padding: 4px 14px;
+    color: var(--text-color);
+    background: var(--bg-medium);
+    border: 1px solid var(--menu-border);
+    cursor: pointer;
+}
+
+.dialog_button:hover {
+    background: var(--bg-light);
+}
+
+.dialog_button:focus-visible {
+    outline: 2px solid var(--tool-blue);
+}
+
+.dialog_button_primary {
+    background: var(--accent-orange);
+    color: #181e22;
+    border-color: var(--accent-orange);
+}
+
+.dialog_button_primary:hover {
+    background: var(--accent-orange-light);
+}

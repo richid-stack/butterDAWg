@@ -1,6 +1,8 @@
 import { Channel } from "../../core/Channel";
 import { globals, React } from "../../globals";
 import { faderToGain, gainToFader, gainToDb, formatDb } from "../../engine/dsp";
+import * as edit from "../../project/edit";
+import { editText } from "../misc/editText";
 
 const clamp = (num: number, min: number, max: number) => {return Math.max(min, Math.min(max, num));};
 
@@ -9,11 +11,19 @@ export class ChannelComponent {
     private element: HTMLElement;
     private channel: Channel;
     private selected: boolean;
+    private index: number;
+    private destroyed = false;
 
-    constructor(channel: Channel) {
+    constructor(channel: Channel, index = 0) {
         this.channel = channel;
+        this.index = index;
         this.selected = false;
         this.createElement();
+    }
+
+    /** stops the level meter; the channel strip is going away (a project was closed) */
+    destroy() {
+        this.destroyed = true;
     }
 
     createElement() {
@@ -56,24 +66,26 @@ export class ChannelComponent {
         function slider_move(e: MouseEvent) {
 			let percent = clamp(((volume_slider.offsetTop + volume_slider.clientHeight/2) + e.movementY)/volume_slider.parentElement.clientHeight, 0, 1);
             channel.setVolume(faderToGain(1 - percent));
-			globals.header_help_text.innerHTML = "Volume: " + formatDb(channel.getVolume());
+			globals.header_help_text.textContent = "Volume: " + formatDb(channel.getVolume());
             volume_slider.style.top = "calc(" + percent*100 + "% - " + volume_slider.clientHeight/2 + "px)";
 		}
         volume_slider.addEventListener("mousedown", () => {
+            // one drag is one undo step
+            const drag = edit.volumeGesture(channel);
             document.addEventListener("mousemove", slider_move);
-        });
-        document.addEventListener("mouseup", () => {
-            document.removeEventListener("mousemove", slider_move);
+            document.addEventListener("mouseup", () => {
+                document.removeEventListener("mousemove", slider_move);
+                drag.end();
+            }, { once: true });
         });
         volume_slider.addEventListener("mouseenter", () => {
-			globals.header_help_text.innerHTML = "Volume: " + formatDb(this.channel.getVolume());
+			globals.header_help_text.textContent = "Volume: " + formatDb(this.channel.getVolume());
 		});
 
         // toggle switch
         let toggle_switch = this.element.querySelector(".channel_toggle") as HTMLElement;
         toggle_switch.addEventListener("click", () => {
-            this.channel.setActive(!this.channel.isActive());
-            (this.element.querySelector(".channel_toggle_green") as HTMLElement).style.backgroundColor = this.channel.isActive() ? "#5cff5c" : "#1a501a";
+            edit.setChannelActive(this.channel, !this.channel.isActive()); // the strip redraws when the history changes
         });
 
         // panning knob
@@ -98,9 +110,9 @@ export class ChannelComponent {
 			}
 
 			if (Math.round(channel.getPanning() * 100) === 100) {
-				globals.header_help_text.innerHTML = "Panning: Centered";
+				globals.header_help_text.textContent = "Panning: Centered";
 			} else {
-				globals.header_help_text.innerHTML =
+				globals.header_help_text.textContent =
 					"Panning: " +
 					Math.abs(Math.round(((channel.getPanning() - 1) / 0.5) * 100)) +
 					"%" +
@@ -108,22 +120,30 @@ export class ChannelComponent {
 			}
 		}
 		pan_knob.addEventListener("mousedown", () => {
+			const drag = edit.panGesture(channel);
 			document.addEventListener("mousemove", pan_move);
-		});
-		document.addEventListener("mouseup", () => {
-			document.removeEventListener("mousemove", pan_move);
+			document.addEventListener("mouseup", () => {
+				document.removeEventListener("mousemove", pan_move);
+				drag.end();
+			}, { once: true });
 		});
         pan_knob.addEventListener("mouseenter", () => {
 			if (Math.round(channel.getPanning() * 100) === 100) {
-				globals.header_help_text.innerHTML = "Panning: Centered";
+				globals.header_help_text.textContent = "Panning: Centered";
 			} else {
-				globals.header_help_text.innerHTML =
+				globals.header_help_text.textContent =
 					"Panning: " +
 					Math.abs(Math.round(((channel.getPanning() - 1) / 0.5) * 100)) +
 					"%" +
 					(channel.getPanning() < 1 ? " left" : " right");
 			}
 		});
+
+        // rename: double click the name
+        const label = this.element.querySelector(".channel_label p") as HTMLElement;
+        label.addEventListener("dblclick", () => {
+            editText(label, this.channel.getName(), (name) => edit.renameChannel(this.channel, name));
+        });
 
         // channel selection
         this.element.addEventListener("mousedown", () => {
@@ -135,6 +155,7 @@ export class ChannelComponent {
         let level_indicator = this.element.querySelector(".indicator_top") as HTMLElement;
         let shown = 0;
         const step = () => {
+            if (this.destroyed) return;
             const peak = this.channel.getPeak();
             const level = clamp((gainToDb(peak) + 60) / 60, 0, 1);
             shown = Math.max(level, shown - 0.015);
@@ -185,6 +206,11 @@ export class ChannelComponent {
     }
 
     update() {
+        // the number and the name
+        (this.element.querySelector(".index_indicator p") as HTMLElement).textContent = String(this.index);
+        const label = this.element.querySelector(".channel_label p") as HTMLElement;
+        if (!label.querySelector("input")) label.textContent = this.channel.getName();
+
         // update the toggle switch
         (this.element.querySelector(".channel_toggle_green") as HTMLElement).style.backgroundColor = this.channel.isActive() ? "#5cff5c" : "#1a501a";
 

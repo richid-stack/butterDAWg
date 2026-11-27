@@ -1,7 +1,8 @@
 import { globals, Draggable, sidebar_folder_colors, insertAfter } from "./globals";
 import { files } from "./platform/files";
 import { isAudioFile } from "./engine/AudioLoader";
-import { SampleSource } from "./core/Sample";
+import { Sample, SampleSource } from "./core/Sample";
+import * as edit from "./project/edit";
 
 // One row of the sidebar: a folder, an audio file or some other file. Folders
 // list their contents when they are opened, so a big library costs nothing
@@ -78,6 +79,14 @@ export class Item extends Draggable implements SampleSource {
 
 	getDragElement() {
 		return this.element.children[1];
+	}
+
+	/** the mouse was let go: a clip that was being dragged onto the playlist stays there, and it can be undone */
+	onDragEnd() {
+		const preview = globals.current_drag_element_preview;
+		if (preview instanceof Sample && preview.track) {
+			edit.recordAddClip(preview);
+		}
 	}
 
 	close() {

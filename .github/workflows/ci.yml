@@ -44,6 +44,9 @@ jobs:
           sudo apt-get install -y ffmpeg
           xvfb-run -a -s "-screen 0 1800x1000x24" node scripts/engine-test.cjs
 
+      - name: Project test (undo and redo of every edit, save and reopen, collect, recovery)
+        run: xvfb-run -a -s "-screen 0 1800x1000x24" node scripts/project-test.cjs
+
       - name: Keep the screenshot
         if: always()
         uses: actions/upload-artifact@v4

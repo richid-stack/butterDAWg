@@ -4,6 +4,8 @@ import { MixerWindow } from "../ui/windows/MixerWindow";
 import { WindowType } from "../ui/misc/window";
 import { AudioGraphWindow } from "../ui/windows/AudioGraphWindow";
 import { msToTime } from "./time";
+import { session } from "../project/session";
+import * as edit from "../project/edit";
 
 // bpm count drag functionality
 var bpm_count = document.querySelector(".bpm");
@@ -17,12 +19,18 @@ function bpm_drag(e: MouseEvent) {
 	showBpm();
 }
 bpm_count.addEventListener("mousedown", () => {
+	// one drag is one undo step
+	const drag = edit.tempoGesture();
 	document.addEventListener("mousemove", bpm_drag);
-});
-document.addEventListener("mouseup", () => {
-	document.removeEventListener("mousemove", bpm_drag);
+	document.addEventListener("mouseup", () => {
+		document.removeEventListener("mousemove", bpm_drag);
+		drag.end();
+	}, { once: true });
 });
 showBpm();
+// undo, redo and opening a project can change the tempo
+session.onRefresh(showBpm);
+session.onLoaded(showBpm);
 
 // play and stop buttons
 const playButton = document.querySelector(".play");

@@ -114,7 +114,7 @@ export interface PluginData {
 // ---- a new project ----------------------------------------------------------
 
 export function emptyChannel(name: string): ChannelData {
-    return { name, volume: 1, panning: 1, active: true, plugins: Array.from({ length: PLUGIN_SLOTS }, () => null) };
+    return { name, volume: 1, panning: 1, active: true, plugins: Array.from({ length: PLUGIN_SLOTS }, (): PluginData | null => null) };
 }
 
 export function newProjectData(appVersion: string, name = "Untitled"): ProjectData {

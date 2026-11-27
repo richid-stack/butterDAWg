@@ -53,9 +53,11 @@ export class Track implements Connectable {
         if (sample.track === this) sample.track = null;
     }
 
-    addSample(sample: Sample) {
+    /** Puts a clip on the track: at the end, or at `index` (to put a clip back where it was). */
+    addSample(sample: Sample, index?: number) {
         sample.track = this;
-        this.samples.push(sample);
+        if (index === undefined || index < 0 || index >= this.samples.length) this.samples.push(sample);
+        else this.samples.splice(index, 0, sample);
     }
 
     /** Sends this track's sound to one place; an earlier connection is dropped. */
@@ -65,12 +67,23 @@ export class Track implements Connectable {
         this.target = object;
     }
 
+    /** Sends this track's sound nowhere (the track is silent until it is connected again). */
+    disconnect() {
+        this.audionode.disconnect();
+        this.target = null;
+    }
+
     getTarget(): Connectable | null {
         return this.target;
     }
 
     getAudioNode(): AudioNode {
         return this.audionode;
+    }
+
+    /** Takes the track out of the audio graph (a project was closed). */
+    dispose() {
+        this.disconnect();
     }
 
     /**

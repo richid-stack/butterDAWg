@@ -35,6 +35,12 @@ export class Playlist implements ClipProvider<PlayableClip> {
         }
     }
 
+    /** Takes every track out of the audio graph (a project was closed). */
+    dispose() {
+        this.tracks.forEach((t) => t.dispose());
+        this.listeners.clear();
+    }
+
     getIndexOfTrack(track: Track) {
         return this.tracks.indexOf(track);
     }

@@ -73,15 +73,25 @@ Phase 2 notes (what was built, and what was left on purpose):
 
 Goal: save, reopen, undo.
 
-- [ ] New `src/project/`: a versioned `Project` model (tempo map, tracks, clips, patterns, channels, plugins, assets). The engine builds from it; the UI edits it.
-- [ ] Command bus with undo and redo. Route every existing edit (move clip, rename, colour, volume, pan, add plugin) through it.
-- [ ] Serializer: JSON plus an `assets/` folder, with a migrate function per version.
-- [ ] File menu: New, Open, Save, Save As, Recent. Hook into the existing menu bar.
-- [ ] Autosave to a recovery file and a crash-recovery prompt on start.
-- [ ] "Collect and save": copy used samples into the project's assets folder.
-- [ ] Every asset in a project records its source and licence, so a chop or a generated sample keeps its origin.
+- [x] New `src/project/`: a versioned `Project` model (tempo map, tracks, clips, patterns, channels, plugins, assets). The engine builds from it; the UI edits it.
+- [x] Command bus with undo and redo. Route every existing edit (move clip, rename, colour, volume, pan, add plugin) through it.
+- [x] Serializer: JSON plus an `assets/` folder, with a migrate function per version.
+- [x] File menu: New, Open, Save, Save As, Recent. Hook into the existing menu bar.
+- [x] Autosave to a recovery file and a crash-recovery prompt on start.
+- [x] "Collect and save": copy used samples into the project's assets folder.
+- [x] Every asset in a project records its source and licence, so a chop or a generated sample keeps its origin.
 
 Done when: save, close and reopen restores the playlist, mixer and plugins exactly, and undo and redo work for every edit above.
+
+Phase 3 notes (what was built, and what was left on purpose):
+
+- The format, the edit model, recovery and the security rules are in `docs/PROJECT.md`. The gate is checked by `npm test` (schema, migrations, history, asset paths and licences, the main-process store) and `npm run test:project` (the real app: undo and redo of every edit in the list above, save, close and reopen compared by value and by a bit-for-bit render, collect and save, a moved folder, missing files, hostile files, close prompts, autosave and crash recovery). A test that changes the engine's behaviour was checked by mutating the code (restore without plugin settings, a fader edit that is not recorded) to see it fail.
+- The project has no patterns yet; they arrive with the pattern model in Phase 4 and are added to the schema as optional fields (no new version needed).
+- Plugins are saved by parameter values. State for plugins that have internal state needs the `.bdp` state API (Phase 5 and 7).
+- Opening a project that uses a plugin or an audio file that is not there still works: the missing part is named in a message and kept in the project, so saving does not lose it. A relink dialog is not built.
+- The starter samples have no recorded licence. They are saved as "unknown" in every project that uses them; `files/licences.json` is where it is recorded once known, and where the user's own libraries get theirs when Phase 4 adds them.
+- The tests now start the app with `BDP_TEST=1` and a scratch settings folder, so they never touch the real recent list or recovery file. (The old smoke test did not, and with the new prompts it hung; fixed.)
+- macOS menu accelerators and Windows path case are not verified yet (listed in `docs/PROJECT.md`).
 
 ## Phase 4: Beat core
 
