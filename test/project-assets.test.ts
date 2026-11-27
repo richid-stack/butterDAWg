@@ -146,3 +146,14 @@ test("safeAssetName: nothing that can leave the assets folder", () => {
     assert.equal(safeAssetName("   "), "file");
     assert.equal(safeAssetName("x".repeat(300)).length, 120);
 });
+
+test("AssetBook: moved uses what is known by default when nothing was remembered", () => {
+    const book = new AssetBook();
+    const byDefault = { source: { kind: "library" as const, library: "Starter samples" }, licence: null, credit: "unknown author" };
+    book.moved("/app/files/samples/kick.wav", "/proj/assets/kick.wav", { sha256: "abc" }, byDefault);
+    assert.deepEqual(book.get("/proj/assets/kick.wav"), { ...byDefault, sha256: "abc" });
+    // what was remembered wins over the default
+    book.remember("/ext/a.wav", { source: { kind: "imported", from: "a.wav" }, licence: "CC0" });
+    book.moved("/ext/a.wav", "/proj/assets/a.wav", {}, byDefault);
+    assert.equal(book.get("/proj/assets/a.wav")?.licence, "CC0");
+});

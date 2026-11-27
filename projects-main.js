@@ -141,7 +141,9 @@ function createProjectStore({ userData }) {
      * Copies files into dir/assets. `resolveSource(from)` returns the real path of
      * a file the page may read, or throws. A file with the same content and name
      * that is already there is reused; a different file with the same name gets
-     * "name-2.ext" and so on.
+     * "name-2.ext" and so on. An item with `unique: true` is never reused: it
+     * always gets a file of its own (the page asks for this when two files with
+     * the same bytes have a different source or licence to keep apart).
      */
     async function copyAssets(dir, items, resolveSource) {
         const d = requireGranted(dir);
@@ -165,7 +167,7 @@ function createProjectStore({ userData }) {
                     await fs.promises.rename(tmp, target);
                     break;
                 }
-                if ((await sha256File(target)) === hash) break; // the same file is already there
+                if (!item.unique && (await sha256File(target)) === hash) break; // the same file is already there
                 candidate = stem + "-" + n + ext;
             }
             out.push({ from, path: "assets/" + candidate, sha256: hash });

@@ -8,8 +8,8 @@ import { globals } from "../globals";
 import { files } from "../platform/files";
 import { projects, ProjectStore, Recovery } from "../platform/projects";
 import { showDialog } from "../ui/Dialog";
-import { assetBook, capture, restore, setLicenceManifest } from "./capture";
-import { baseName, parseLicenceManifest, Roots } from "./assets";
+import { assetBook, capture, metaFor, restore, setLicenceManifest } from "./capture";
+import { AssetMeta, baseName, parseLicenceManifest, Roots } from "./assets";
 import { History } from "./History";
 import { ProjectData, ProjectError, parseProject, serializeProject } from "./schema";
 import { defaultProjectData } from "./template";
@@ -28,6 +28,10 @@ export class Session {
     private lastAutosaveRevision = -1;
     private autosaveTimer: ReturnType<typeof setInterval> | null = null;
     private busy = false;
+    // true while a project is being put in place: the windows are rebuilt at the end, so they are not asked to redraw before
+    private loading = false;
+    // true when a recovery file is on disk that belongs to this session's unsaved work (so it can be removed when the work is gone)
+    private recoveryOnDisk = false;
 
     constructor(store: ProjectStore = projects) {
         this.store = store;
@@ -35,7 +39,7 @@ export class Session {
         this.history.onChange(() => {
             this.updateTitle();
             this.store.setDirty(this.history.isDirty());
-            this.refreshListeners.forEach((cb) => cb());
+            if (!this.loading) this.refreshListeners.forEach((cb) => cb());
         });
     }
 
@@ -87,7 +91,7 @@ export class Session {
         return this.exclusive(async () => {
             if (!(await this.confirmDiscard())) return false;
             await this.load(defaultProjectData(this.store.appVersion), null, "Untitled");
-            await this.store.clearRecovery();
+            await this.clearRecovery();
             return true;
         });
     }
@@ -131,7 +135,7 @@ export class Session {
             return false;
         }
         await this.load(data, dir, data.name);
-        await this.store.clearRecovery();
+        await this.clearRecovery();
         return true;
     }
 
@@ -152,6 +156,7 @@ export class Session {
     }
 
     private async write(opts: { as: boolean; collect: boolean }): Promise<boolean> {
+        const previous = { dir: this.dir, name: this.name };
         let dir = this.dir;
         let name = this.name;
         if (opts.as || !dir) {
@@ -160,39 +165,75 @@ export class Session {
             dir = picked;
             name = baseName(picked);
         }
+        // the clips that were pointed at their new copy, so a failed save can put them back
+        const repointed: Array<[{ path: string }, string]> = [];
         try {
+            const roots = this.roots; // where the files are now, before anything moves
+            const clips = [...(globals.playlist.getClips() as Iterable<{ path: string; missingAsset?: unknown }>)];
             // audio files that have to be in the project folder: the project's own when it moves, and everything when collecting
             const wanted = new Map<string, string>(); // absolute path -> name in assets/
-            for (const clip of globals.playlist.getClips() as Iterable<{ path: string }>) {
-                if (wanted.has(clip.path)) continue;
+            for (const clip of clips) {
+                if (clip.missingAsset || wanted.has(clip.path)) continue; // a clip with no file has nothing to copy
                 const here = this.classify(clip.path);
                 const moving = here === "project" && dir !== this.dir;
                 const collecting = opts.collect && here !== "project";
                 if (moving || collecting) wanted.set(clip.path, baseName(clip.path));
             }
             if (wanted.size > 0) {
-                const copied = await this.store.copyAssets(dir, [...wanted].map(([from, n]) => ({ from, name: n })));
-                const newDir = dir;
+                const copied = await this.copyIntoProject(dir, wanted, roots);
                 for (const c of copied) {
-                    const target = newDir.replace(/\\/g, "/").replace(/\/+$/, "") + "/" + c.path;
-                    assetBook.moved(c.from, target, { sha256: c.sha256 });
-                    for (const clip of globals.playlist.getClips() as Iterable<{ path: string }>) {
-                        if (clip.path === c.from) clip.path = target;
+                    const target = dir.replace(/\\/g, "/").replace(/\/+$/, "") + "/" + c.path;
+                    assetBook.moved(c.from, target, { sha256: c.sha256 }, metaFor(c.from, roots));
+                    for (const clip of clips) {
+                        if (clip.path === c.from) {
+                            repointed.push([clip, clip.path]);
+                            clip.path = target;
+                        }
                     }
                 }
             }
             this.dir = dir;
             this.name = name;
+            // the text and the revision it was made at, in one step: anything done while the file is being written is not in it
+            const revision = this.history.revision;
             const text = serializeProject(this.capture());
             await this.store.writeProject(dir, text);
+            this.history.markSaved(revision);
         } catch (err) {
+            // the project stays where it was: the same name, the same folder, the same files
+            this.dir = previous.dir;
+            this.name = previous.name;
+            for (const [clip, path] of repointed) clip.path = path;
             await this.tell("Cannot save the project", errorText(err));
             this.updateTitle();
             return false;
         }
-        this.history.markSaved();
-        await this.store.clearRecovery().catch(() => {});
+        await this.clearRecovery().catch(() => {});
         return true;
+    }
+
+    /**
+     * Copies files into the folder's assets/. A file that is byte for byte the same as one already there is stored
+     * once, unless the two have a different source or licence: those records are kept apart, each with its own file.
+     */
+    private async copyIntoProject(dir: string, wanted: Map<string, string>, roots: Roots): Promise<Array<{ from: string; path: string; sha256: string }>> {
+        const items = [...wanted].map(([from, name]) => ({ from, name }));
+        const copied = await this.store.copyAssets(dir, items);
+        const base = dir.replace(/\\/g, "/").replace(/\/+$/, "") + "/";
+        const keyOf = (m: AssetMeta) => JSON.stringify([m.source, m.licence, m.credit ?? null]);
+        const claimed = new Map<string, string>(); // target -> the provenance of the first file that went there
+        const apart: string[] = [];
+        for (const c of copied) {
+            const key = keyOf(metaFor(c.from, roots));
+            const existing = assetBook.get(base + c.path);
+            const owner = claimed.get(c.path) ?? (existing ? keyOf(existing) : undefined);
+            if (owner !== undefined && owner !== key) apart.push(c.from);
+            else claimed.set(c.path, key);
+        }
+        if (apart.length === 0) return copied;
+        const own = await this.store.copyAssets(dir, apart.map((from) => ({ from, name: wanted.get(from) as string, unique: true })));
+        const byFrom = new Map(own.map((c) => [c.from, c]));
+        return copied.map((c) => byFrom.get(c.from) ?? c);
     }
 
     private classify(path: string): "project" | "app" | "external" {
@@ -205,15 +246,21 @@ export class Session {
 
     /** Replaces everything with a project. `dirty` is for recovered work: it differs from what is on disk. */
     private async load(data: ProjectData, dir: string | null, name: string, dirty = false): Promise<void> {
-        assetBook.clear();
-        const result = await restore(data, { appRoot: files.root, projectDir: dir });
-        this.dir = dir;
-        this.name = name;
-        this.history.clear();
-        if (dirty) this.history.markDirty();
-        this.lastAutosaveRevision = this.history.revision;
-        this.updateTitle();
-        this.loadedListeners.forEach((cb) => cb());
+        this.loading = true;
+        let result;
+        try {
+            assetBook.clear();
+            result = await restore(data, { appRoot: files.root, projectDir: dir });
+            this.dir = dir;
+            this.name = name;
+            this.history.clear();
+            if (dirty) this.history.markDirty();
+            this.lastAutosaveRevision = this.history.revision;
+            this.updateTitle();
+            this.loadedListeners.forEach((cb) => cb());
+        } finally {
+            this.loading = false;
+        }
 
         // tell the user about anything that did not come back, without holding the project up
         const missingPlugins = result.missingPlugins;
@@ -229,7 +276,12 @@ export class Session {
 
     /** Writes the project to the recovery file, if there is unsaved work that was not written yet. */
     async autosaveNow(): Promise<boolean> {
-        if (!this.history.isDirty() || this.history.revision === this.lastAutosaveRevision) return false;
+        if (!this.history.isDirty()) {
+            // the work was undone back to what is saved: a recovery file from before would bring back what was undone
+            if (this.recoveryOnDisk) await this.clearRecovery();
+            return false;
+        }
+        if (this.history.revision === this.lastAutosaveRevision) return false;
         const revision = this.history.revision;
         const recovery: Recovery = {
             savedAt: new Date().toISOString(),
@@ -238,8 +290,14 @@ export class Session {
             text: serializeProject(this.capture()),
         };
         await this.store.writeRecovery(recovery);
+        this.recoveryOnDisk = true;
         this.lastAutosaveRevision = revision;
         return true;
+    }
+
+    private async clearRecovery(): Promise<void> {
+        this.recoveryOnDisk = false;
+        await this.store.clearRecovery();
     }
 
     /** If the app did not close properly last time, asks whether to bring the unsaved work back. */
@@ -261,12 +319,13 @@ export class Session {
             try {
                 const data = parseProject(recovery.text);
                 await this.load(data, recovery.dir, data.name, true);
+                this.recoveryOnDisk = true; // the file stays until the work is saved, so a second crash does not lose it
                 return;
             } catch (err) {
                 await this.tell("The recovery file is damaged", errorText(err));
             }
         }
-        await this.store.clearRecovery();
+        await this.clearRecovery();
     }
 
     // ---- asking and telling
@@ -279,7 +338,10 @@ export class Session {
             message: `"${this.name}" has changes that are not saved.`,
             buttons: [{ label: "Save", primary: true }, { label: "Don't save" }, { label: "Cancel", cancel: true }],
         });
-        if (choice === 0) return this.write({ as: false, collect: false });
+        if (choice === 0) {
+            // saved, and nothing was changed while it was being written (that would be lost if the project is replaced now)
+            return (await this.write({ as: false, collect: false })) && !this.history.isDirty();
+        }
         return choice === 1;
     }
 

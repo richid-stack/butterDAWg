@@ -75,8 +75,8 @@ export class AssetBook {
     }
 
     /** moves what is known about a file to its new path (it was copied into the project) */
-    moved(from: string, to: string, extra: Partial<AssetMeta> = {}): void {
-        const old = this.get(from);
+    moved(from: string, to: string, extra: Partial<AssetMeta> = {}, fallback?: AssetMeta): void {
+        const old = this.get(from) ?? fallback;
         if (old) this.remember(to, { ...old, ...extra });
     }
 

@@ -12,6 +12,8 @@ export class PluginWindow extends Window {
     private pluginId: string;
     private unsubscribe: Array<() => void> = [];
     private endGesture: () => void = () => {};
+    // the plugin's own code can offer a function that shows the parameters' current values in its controls
+    private refreshControls: () => void = () => {};
 
     constructor(plugin: Plugin) {
         super(false);
@@ -29,6 +31,7 @@ export class PluginWindow extends Window {
         this.unsubscribe.push(session.onRefresh(() => {
             const channels = [...globals.mixer.getChannels(), globals.mixer.getMaster()];
             if (!channels.some((c) => c.getPlugins().includes(this.plugin))) this.close();
+            else this.refreshControls(); // an undo or redo may have changed what the controls show
         }));
     }
 
@@ -72,9 +75,11 @@ export class PluginWindow extends Window {
 
         // load plugin js
         const initializePlugin = eval(hostContent);
-        initializePlugin(
+        const host = initializePlugin(
             this.pluginId,
             this.plugin.getAudioNode(),
         );
+        // a plugin's host function may return { refresh() }, which sets its controls from the parameters again
+        if (host && typeof host.refresh === "function") this.refreshControls = () => host.refresh();
     }
 }

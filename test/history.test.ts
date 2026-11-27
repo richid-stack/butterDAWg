@@ -172,3 +172,30 @@ test("history: listeners hear about every change", () => {
     history.execute(set(2));
     assert.equal(n, 4);
 });
+
+test("markSaved(revision): an edit made after the saved text was made is not saved", () => {
+    const h = new History();
+    let n = 0;
+    h.execute({ label: "one", redo: () => n++, undo: () => n-- });
+    const revision = h.revision; // the text is made here
+    h.execute({ label: "two", redo: () => n++, undo: () => n-- }); // while the file is being written
+    h.markSaved(revision);
+    assert.equal(h.isDirty(), true);
+    // and undoing back to the state of the text does not make it look saved either (that state is not one the history knows)
+    h.undo();
+    assert.equal(h.isDirty(), true);
+    // a later save, with nothing done during it, is clean
+    h.markSaved(h.revision);
+    assert.equal(h.isDirty(), false);
+});
+
+test("markSaved(revision): nothing done during the save is the normal case", () => {
+    const h = new History();
+    h.execute({ label: "one", redo: () => {}, undo: () => {} });
+    h.markSaved(h.revision);
+    assert.equal(h.isDirty(), false);
+    h.undo();
+    assert.equal(h.isDirty(), true);
+    h.redo();
+    assert.equal(h.isDirty(), false);
+});

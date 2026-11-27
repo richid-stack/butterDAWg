@@ -2,6 +2,7 @@ import { globals } from "../globals";
 import { PlayableClip } from "../engine/Voices";
 import { Peaks } from "../engine/Peaks";
 import { Track } from "./Track";
+import type { AssetData } from "../project/schema";
 
 // An audio clip on the playlist: one placement of an audio file. Its position
 // is in beats, so changing the tempo moves the music but not the clips. Its
@@ -26,6 +27,11 @@ export class Sample implements PlayableClip {
 
     /** the track this clip is on; set by Track.addSample */
     track: Track | null = null;
+    /**
+     * Set when the project says where the file is but the place cannot be worked out (a project folder that is
+     * gone). The clip stays, and is saved again with this record, so the arrangement is not lost.
+     */
+    missingAsset: AssetData | null = null;
     /** resolves when the file has been read and decoded */
     readonly loaded: Promise<void>;
 
@@ -115,6 +121,7 @@ export class Sample implements PlayableClip {
             loadError: this.loadError,
             listeners: new Set(),
             track: null,
+            missingAsset: this.missingAsset,
             loaded: this.loaded,
         });
         track.addSample(copy);

@@ -115,10 +115,18 @@ export class History {
         this.changed();
     }
 
-    /** the project was saved: it is clean until something else is done */
-    markSaved(): void {
-        this.savedAt = this.done.length;
-        this.forcedDirty = false;
+    /**
+     * The project was saved: it is clean until something else is done. `atRevision` is the history's
+     * revision when the saved text was made; if anything was done while the file was being written,
+     * the file does not have it, so the project stays unsaved.
+     */
+    markSaved(atRevision?: number): void {
+        if (atRevision !== undefined && atRevision !== this.count) {
+            this.savedAt = -1; // the saved state is not one this history can return to
+        } else {
+            this.savedAt = this.done.length;
+            this.forcedDirty = false;
+        }
         this.changed();
     }
 

@@ -315,6 +315,16 @@ async function selectPlugin(page, slot, name) {
       await slider.waitFor({ timeout: 5000 });
       await slider.evaluate((el) => { el.value = "35"; el.dispatchEvent(new Event("input", { bubbles: true })); });
     });
+    {
+      // the plugin's window is still open: it has to show what is sounding after an undo and a redo
+      const slider = page.locator('[id^="p-"] #slider-param1').first();
+      const sounding = () => page.evaluate(() => Math.round(window.__bdp.globals.mixer.getChannels()[1].getPlugins()[0].getParams().level * 100));
+      await page.keyboard.press("Control+z");
+      const shownUndone = Number(await slider.inputValue());
+      check("after an undo the plugin's window shows the value that is sounding", shownUndone === (await sounding()) && shownUndone !== 35, `shows ${shownUndone}`);
+      await page.keyboard.press("Control+Shift+z");
+      check("after a redo it shows the changed value again", Number(await slider.inputValue()) === 35 && (await sounding()) === 35);
+    }
     await edited(page, "bypass a plugin", () => page.locator(".plugin_slot").nth(0).locator(".plugin_toggle").click());
     await edited(page, "enable it again", () => page.locator(".plugin_slot").nth(0).locator(".plugin_toggle").click());
     await edited(page, "add a second plugin", () => selectPlugin(page, 1, "SimpleDistortion"));
@@ -641,6 +651,212 @@ async function selectPlugin(page, slot, name) {
     const channels = await page.evaluate(() => window.__bdp.globals.mixer.getChannels().map((c) => c.getName()));
     check("Discard drops the recovered work for good", channels[1] === "Channel 1" && !fs.existsSync(path.join(fresh, "recovery", "recovery.json")), channels.join(","));
     await app.close();
+  }
+
+  // ---- 8. things a code review found: each one is reproduced here -----------------
+  {
+    const lib = path.join(root, "files", "samples", "kick1.wav");
+    const addClip = (page, spec) => page.evaluate(({ track, file, name, beat }) => {
+      const { globals, Sample, edit } = window.__bdp;
+      const sample = new Sample({ path: file, title: name });
+      sample.setStartBeat(beat);
+      globals.playlist.getTracks()[track].addSample(sample);
+      edit.recordAddClip(sample);
+    }, spec);
+    const readProject = (dir) => JSON.parse(fs.readFileSync(path.join(dir, "project.json"), "utf8"));
+    const data8 = path.join(scratch, "userdata8");
+    fs.mkdirSync(data8, { recursive: true });
+
+    // -- Save As that fails keeps the project where it was
+    {
+      const { app, page } = await launch({ data: data8 });
+      await addClip(page, { track: 0, file: lib, name: "kick1", beat: 0 });
+      const home = path.join(projects, "Review home");
+      await answers(app, { save: [home] });
+      await menu(page, "file", "Save as…");
+      await page.waitForFunction(() => window.__bdp.session.name === "Review home" && !window.__bdp.session.isDirty(), null, { timeout: 10000 });
+      await addClip(page, { track: 1, file: lib, name: "kick1 again", beat: 4 });
+      const before = await state(page);
+      const clipPaths = () => page.evaluate(() => [...window.__bdp.globals.playlist.getClips()].map((c) => c.path));
+      const pathsBefore = await clipPaths();
+
+      // a folder whose project.json is a folder: the copy of the audio works, then writing the project fails
+      const bad = path.join(projects, "Review bad target");
+      fs.mkdirSync(path.join(bad, "project.json"), { recursive: true });
+      await answers(app, { save: [bad] });
+      await menu(page, "file", "Save as…");
+      await page.locator(".dialog_box").first().waitFor({ timeout: 10000 });
+      check("a failed Save As says so", /Cannot save/.test(await dialogText(page)));
+      await pressDialog(page, "OK");
+      const after = await page.evaluate(() => ({ name: window.__bdp.session.name, dir: window.__bdp.session.dir }));
+      check("a failed Save As keeps the project's name and folder", after.name === "Review home" && after.dir === home, JSON.stringify(after));
+      check("a failed Save As keeps the clips pointed at their files", JSON.stringify(await clipPaths()) === JSON.stringify(pathsBefore));
+      check("a failed Save As changes nothing in the project", (await state(page)) === before && (await dirty(page)));
+      // a plain Save still goes to the folder it came from, without asking where
+      await menu(page, "file", "Save");
+      await page.waitForFunction(() => !window.__bdp.session.isDirty(), null, { timeout: 10000 });
+      check("Save after a failed Save As writes to the original folder", readProject(home).tracks[1].clips.length === 1);
+      await app.close();
+    }
+
+    // -- an edit made while the file is being written stays unsaved
+    {
+      const { app, page } = await launch({ data: data8 });
+      const home = path.join(projects, "Review slow save");
+      await answers(app, { save: [home] });
+      await page.evaluate(() => {
+        const s = window.__bdp.session;
+        const write = s.store.writeProject.bind(s.store);
+        s.store.writeProject = async (...args) => { await new Promise((r) => (window.__releaseSave = r)); return write(...args); };
+      });
+      const saving = page.evaluate(() => window.__bdp.session.save());
+      await page.waitForFunction(() => typeof window.__releaseSave === "function", null, { timeout: 10000 });
+      await page.evaluate(() => window.__bdp.edit.renameChannel(window.__bdp.globals.mixer.getChannels()[0], "Edited while saving"));
+      await page.evaluate(() => window.__releaseSave());
+      await saving;
+      check("an edit made during a save is not in the saved file", !fs.readFileSync(path.join(home, "project.json"), "utf8").includes("Edited while saving"));
+      check("an edit made during a save leaves the project unsaved", await dirty(page));
+      await app.close();
+    }
+
+    // -- undoing back to the saved state removes the recovery file the session wrote; a pending one is left alone
+    {
+      const fresh = path.join(scratch, "userdata8b");
+      fs.mkdirSync(fresh, { recursive: true });
+      const { app, page } = await launch({ data: fresh });
+      await page.evaluate(() => window.__bdp.edit.renameChannel(window.__bdp.globals.mixer.getChannels()[3], "Temporary"));
+      await page.evaluate(() => window.__bdp.session.autosaveNow());
+      const rec = path.join(fresh, "recovery", "recovery.json");
+      check("autosave wrote the recovery file", fs.existsSync(rec));
+      await page.keyboard.press("Control+z");
+      await page.evaluate(() => window.__bdp.session.autosaveNow());
+      check("undoing back to the saved state removes the recovery file (it would bring back what was undone)", !fs.existsSync(rec));
+      await app.close();
+    }
+    {
+      const fresh = path.join(scratch, "userdata8c");
+      fs.mkdirSync(path.join(fresh, "recovery"), { recursive: true });
+      fs.writeFileSync(path.join(fresh, "recovery", "recovery.json"), JSON.stringify({ savedAt: new Date().toISOString(), name: "Waiting", dir: null, text: "{}" }));
+      const { app, page } = await launch({ data: fresh, wait: false });
+      await page.locator(".dialog_box").first().waitFor({ timeout: 15000 });
+      await page.evaluate(() => window.__bdp.session.autosaveNow());
+      check("autosave leaves a recovery file alone while the user is deciding about it", fs.existsSync(path.join(fresh, "recovery", "recovery.json")));
+      await pressDialog(page, "Discard").catch(() => {});
+      await app.close();
+    }
+
+    // -- closing a window whose page crashed keeps the work that can be recovered
+    {
+      const fresh = path.join(scratch, "userdata8d");
+      fs.mkdirSync(fresh, { recursive: true });
+      const { app, page } = await launch({ data: fresh });
+      await page.evaluate(() => window.__bdp.edit.renameChannel(window.__bdp.globals.mixer.getChannels()[2], "After the crash"));
+      await page.evaluate(() => window.__bdp.session.autosaveNow());
+      const proc = app.process();
+      await app.evaluate(({ BrowserWindow }) => {
+        const win = BrowserWindow.getAllWindows()[0];
+        win.webContents.forcefullyCrashRenderer();
+        setTimeout(() => win.close(), 500);
+      });
+      await new Promise((resolve) => { proc.once("exit", resolve); setTimeout(resolve, 8000); });
+      check("the recovery file survives closing a crashed window", fs.existsSync(path.join(fresh, "recovery", "recovery.json")));
+      const { app: again, page: page2 } = await launch({ data: fresh, wait: false });
+      await page2.locator(".dialog_box").first().waitFor({ timeout: 15000 });
+      check("and the work is offered on the next start", /Recover your work\?/.test(await dialogText(page2)));
+      await pressDialog(page2, "Discard");
+      await again.close();
+    }
+
+    // -- a project with more tracks than the window had rows opens without errors
+    {
+      const fresh = path.join(scratch, "userdata8e");
+      fs.mkdirSync(fresh, { recursive: true });
+      const { app, page, problems } = await launch({ data: fresh });
+      const big = path.join(projects, "Review many tracks");
+      fs.mkdirSync(path.join(big, "assets"), { recursive: true });
+      const doc = await page.evaluate(() => {
+        const d = window.__bdp.session.capture();
+        const extra = JSON.parse(JSON.stringify(d.tracks[d.tracks.length - 1]));
+        for (let i = 0; i < 3; i++) d.tracks.push({ ...extra, title: "Extra " + i });
+        d.name = "many";
+        return d;
+      });
+      fs.writeFileSync(path.join(big, "project.json"), JSON.stringify(doc));
+      const tracksBefore = await page.locator(".track").count();
+      await answers(app, { open: [big] });
+      await menu(page, "file", "Open…");
+      await page.waitForFunction(() => window.__bdp.session.name === "many", null, { timeout: 10000 });
+      await page.waitForTimeout(300);
+      const rows = await page.locator(".track").count();
+      check("a project with more tracks than were showing opens and shows them all", rows === tracksBefore + 3, `${tracksBefore} -> ${rows}`);
+      check("opening it raised no errors in the page", problems.length === 0, problems.slice(0, 2).join(" | "));
+      await app.close();
+    }
+
+    // -- Collect and save in a project that was never saved: library files keep their source, licence and hash
+    {
+      const fresh = path.join(scratch, "userdata8f");
+      fs.mkdirSync(fresh, { recursive: true });
+      const same = path.join(external, "kick1.wav"); // the same bytes as the library's, from somewhere else
+      fs.copyFileSync(lib, same);
+      const { app, page } = await launch({ data: fresh });
+      await addClip(page, { track: 0, file: lib, name: "library kick", beat: 0 });
+      await addClip(page, { track: 1, file: same, name: "my own copy", beat: 4 });
+      const home = path.join(projects, "Review collect");
+      await answers(app, { save: [home] });
+      await menu(page, "file", "Collect and save");
+      await page.waitForFunction(() => window.__bdp.session.name === "Review collect" && !window.__bdp.session.isDirty(), null, { timeout: 15000 });
+      const saved = readProject(home);
+      const kicks = saved.assets.filter((a) => /^kick1(-2)?\.wav$/.test(a.name));
+      const fromLibrary = saved.assets.find((a) => a.source.kind === "library");
+      const imported = saved.assets.find((a) => a.source.kind === "imported");
+      check("a collected library file keeps its library source and its hash", !!fromLibrary && fromLibrary.location === "project" && /^[0-9a-f]{64}$/.test(fromLibrary.sha256 || ""), JSON.stringify(fromLibrary));
+      check("a collected library file keeps its credit note", !!fromLibrary && /repository/.test(fromLibrary.credit || ""));
+      check("two identical files with different sources are kept as two assets", kicks.length === 2 && kicks[0].path !== kicks[1].path, JSON.stringify(kicks.map((k) => k.path)));
+      check("each of them is a file in assets/, and the record of each is its own", !!imported && fs.existsSync(path.join(home, imported.path)) && fs.existsSync(path.join(home, fromLibrary.path)) && imported.path !== fromLibrary.path);
+      await app.close();
+    }
+
+    // -- recovered work whose project folder is gone keeps its clips
+    {
+      const fresh = path.join(scratch, "userdata8g");
+      fs.mkdirSync(fresh, { recursive: true });
+      const home = path.join(projects, "Review vanishing");
+      {
+        const { app, page } = await launch({ data: fresh });
+        await addClip(page, { track: 2, file: lib, name: "will be collected", beat: 8 });
+        await answers(app, { save: [home] });
+        await menu(page, "file", "Collect and save");
+        await page.waitForFunction(() => window.__bdp.session.name === "Review vanishing" && !window.__bdp.session.isDirty(), null, { timeout: 15000 });
+        await page.evaluate(() => window.__bdp.edit.renameChannel(window.__bdp.globals.mixer.getChannels()[0], "Unsaved"));
+        await page.evaluate(() => window.__bdp.session.autosaveNow());
+        app.process().kill("SIGKILL");
+        await new Promise((r) => setTimeout(r, 800));
+      }
+      fs.rmSync(home, { recursive: true, force: true }); // the folder is gone before the app starts again
+      {
+        const { app, page } = await launch({ data: fresh, wait: false });
+        await page.locator(".dialog_box").first().waitFor({ timeout: 15000 });
+        // (another dialog follows at once, so the overlay does not go away in between)
+        await page.locator(".dialog_button", { hasText: "Recover" }).first().click();
+        await page.waitForFunction(() => window.__bdp.globals.playlist.getTracks().some((t) => t.getSamples().length > 0), null, { timeout: 10000 });
+        await page.locator(".dialog_box", { hasText: "could not be loaded" }).first().waitFor({ timeout: 10000 });
+        check("the app says the project's audio could not be found", /could not be loaded/.test(await dialogText(page)) && /assets\/kick1\.wav/.test(await dialogText(page)));
+        await pressDialog(page, "OK");
+        const kept = await page.evaluate(() => {
+          const d = window.__bdp.session.capture();
+          return { clips: d.tracks[2].clips.length, asset: d.assets.find((a) => a.name === "kick1.wav") };
+        });
+        check("recovered clips whose folder is gone are kept, with their record", kept.clips === 1 && kept.asset && kept.asset.location === "project" && kept.asset.path === "assets/kick1.wav" && kept.asset.source.kind === "library", JSON.stringify(kept));
+        const rescue = path.join(projects, "Review rescued");
+        await answers(app, { save: [rescue] });
+        await menu(page, "file", "Save as…");
+        await page.waitForFunction(() => window.__bdp.session.name === "Review rescued" && !window.__bdp.session.isDirty(), null, { timeout: 10000 });
+        const resaved = readProject(rescue);
+        check("saving the recovered project does not drop the clips", resaved.tracks[2].clips.length === 1 && resaved.assets.some((a) => a.path === "assets/kick1.wav"));
+        await app.close();
+      }
+    }
   }
 
   for (const app of apps) await app.close().catch(() => {});

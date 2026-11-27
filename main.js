@@ -109,8 +109,8 @@ const createWindow = () => {
             win.webContents.send('app:close-requested')
             return
         }
-        // a normal exit: there is nothing left to recover
-        if (store) store.clearRecoverySync()
+        // a normal exit: there is nothing left to recover (but a crashed page never got to save, so its work stays recoverable)
+        if (store && !win.webContents.isCrashed()) store.clearRecoverySync()
     })
 
     mainWindow = win;

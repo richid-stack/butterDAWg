@@ -88,11 +88,30 @@ Edits that are covered: add, move (along and across tracks) and delete clips, mu
 colour a track, route a track, volume, panning, mute and rename a channel, add, remove and bypass a
 plugin, change a plugin's settings, change the tempo.
 
+## Plugin windows
+
+A plugin's `host.js` builds its controls. If it returns `{ refresh() }`, the app calls that after every
+undo, redo or other history change, so the controls show what is sounding. (`Gain` and `SimpleDistortion`
+do this.)
+
 ## File menu
 
 New project, Open…, Open recent, Save, Save as…, Collect and save (Ctrl/Cmd+N, O, S, Shift+S).
 Anything that would drop unsaved work asks first: *Save*, *Don't save*, *Cancel* (New, Open, and closing
 the window).
+
+### Saving, exactly
+
+- The text that is written and the history revision it was made at are taken in one step. An edit made
+  while the file is being written is not in the file, and the project stays unsaved. (Close, New and Open
+  treat that as "not saved" and ask again.)
+- Save As that fails (disk full, a folder that cannot be written) leaves the project as it was: the same
+  name, the same folder, the clips still pointing at the files they had.
+- Collect and save keeps each file's source, licence and credit, including library files in a project
+  that was never saved. Two files with the same bytes and name but a different source or licence are
+  stored as two files (`kick.wav`, `kick-2.wav`), so the records stay apart.
+- A clip whose file cannot be found because its project folder is gone (recovered work) is kept with its
+  record and saved again with it.
 
 ## Autosave and recovery
 
@@ -100,6 +119,10 @@ Every 30 seconds, if the project has changed since the last autosave, the whole 
 `userData/recovery/recovery.json`. It is removed by a successful save, by New/Open, by Discard, and by a
 normal exit. If the app finds it on start, the process did not exit normally, and the app offers
 **Recover** or **Discard**. Recovered work comes back as unsaved.
+
+A recovery file the session wrote is removed again when the work is undone back to what is saved (it
+would bring back what was undone), and one that was found at start is left alone until the user chooses.
+A window whose page crashed keeps its recovery file: that is the case it is for.
 
 Autosave never touches `project.json`; only Save does, and Save keeps the previous file as
 `project.json.bak` and writes through a temporary file and a rename, so a crash cannot leave half a file.

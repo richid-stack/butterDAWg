@@ -15,6 +15,7 @@ import { Sample } from "../core/Sample";
 import { Color } from "../ui/misc/Color";
 import {
     AssetBook,
+    AssetMeta,
     baseName,
     classify,
     defaultMeta,
@@ -30,6 +31,11 @@ export const assetBook = new AssetBook();
 let manifest: LicenceManifest | null = null;
 export function setLicenceManifest(m: LicenceManifest | null): void {
     manifest = m;
+}
+
+/** what is recorded for a file: what was remembered about it, or what the library record says */
+export function metaFor(absolute: string, roots: Roots): AssetMeta {
+    return assetBook.get(absolute) ?? defaultMeta(absolute, roots, manifest);
 }
 
 export interface CaptureOptions extends Roots {
@@ -58,17 +64,25 @@ export function capture(options: CaptureOptions): ProjectData {
     // every file the clips use becomes one asset, in the order the clips first use it
     const assets: AssetData[] = [];
     const idByPath = new Map<string, string>();
-    const assetFor = (absolute: string): string => {
-        const known = idByPath.get(absolute);
+    const assetFor = (sample: Sample): string => {
+        // a clip whose file cannot be found keeps the record it came with
+        const missing = sample.missingAsset;
+        const key = missing ? "missing:" + missing.location + ":" + missing.path : sample.path;
+        const known = idByPath.get(key);
         if (known) return known;
-        const { location, path } = classify(absolute, roots);
-        const meta = assetBook.get(absolute) ?? defaultMeta(absolute, roots, manifest);
         const id = "a" + (assets.length + 1);
-        const asset: AssetData = { id, location, path, name: baseName(absolute), source: meta.source, licence: meta.licence };
-        if (meta.sha256) asset.sha256 = meta.sha256;
-        if (meta.credit) asset.credit = meta.credit;
-        assets.push(asset);
-        idByPath.set(absolute, id);
+        if (missing) {
+            assets.push({ ...missing, id });
+        } else {
+            const absolute = sample.path;
+            const { location, path } = classify(absolute, roots);
+            const meta = metaFor(absolute, roots);
+            const asset: AssetData = { id, location, path, name: baseName(absolute), source: meta.source, licence: meta.licence };
+            if (meta.sha256) asset.sha256 = meta.sha256;
+            if (meta.credit) asset.credit = meta.credit;
+            assets.push(asset);
+        }
+        idByPath.set(key, id);
         return id;
     };
 
@@ -84,7 +98,7 @@ export function capture(options: CaptureOptions): ProjectData {
             enabled: track.isActive(),
             route,
             clips: track.getSamples().map((sample) => ({
-                asset: assetFor(sample.path),
+                asset: assetFor(sample),
                 startBeat: sample.getStartBeat(),
                 name: sample.getName(),
             })),
@@ -144,10 +158,6 @@ export async function restore(data: ProjectData, roots: Roots): Promise<RestoreR
     const engine = globals.engine;
     const ctx = engine.ctx;
 
-    // nothing may be playing while the project underneath is swapped
-    engine.stop();
-    engine.seek(0);
-
     // ---- build the new mixer and playlist next to the old ones
     const mixer = new Mixer(ctx, 0);
     data.mixer.channels.forEach(() => mixer.newChannel());
@@ -168,20 +178,32 @@ export async function restore(data: ProjectData, roots: Roots): Promise<RestoreR
         }
         for (const clip of trackData.clips) {
             const asset = assets.get(clip.asset);
-            const absolute = asset ? toAbsolute(asset, roots) : null;
-            if (!asset || absolute === null) continue; // validateProject makes sure the asset exists; a project asset needs the project folder
-            const sample = new Sample({ path: absolute, title: clip.name });
+            if (!asset) continue; // validateProject makes sure the asset exists
+            // A project asset has no place until the project has a folder (recovered work whose folder is gone). The
+            // clip is kept, as a clip with a missing file, so that saving does not drop it from the arrangement.
+            const absolute = toAbsolute(asset, roots);
+            const sample = new Sample({ path: absolute ?? "missing://" + asset.path, title: clip.name });
+            if (absolute === null) sample.missingAsset = asset;
             sample.setStartBeat(clip.startBeat);
             track.addSample(sample);
             samples.push(sample);
-            const meta: Parameters<AssetBook["remember"]>[1] = { source: asset.source, licence: asset.licence };
-            if (asset.credit) meta.credit = asset.credit;
-            if (asset.sha256) meta.sha256 = asset.sha256;
-            assetBook.remember(absolute, meta);
+            if (absolute !== null) {
+                const meta: Parameters<AssetBook["remember"]>[1] = { source: asset.source, licence: asset.licence };
+                if (asset.credit) meta.credit = asset.credit;
+                if (asset.sha256) meta.sha256 = asset.sha256;
+                assetBook.remember(absolute, meta);
+            }
         }
     }
 
-    // ---- swap them in
+    // ---- plugins load their code in the background; wait, so that the swap below happens in one go with nothing
+    // half-loaded, and the windows are never asked to draw a project they do not have the parts of
+    const settled = await Promise.allSettled(plugins.map((p) => p.ready));
+    const missingPlugins = plugins.filter((_, i) => settled[i].status === "rejected").map((p) => p.pluginPath);
+
+    // ---- swap them in (nothing may be playing while the project underneath is swapped)
+    engine.stop();
+    engine.seek(0);
     const old = { mixer: globals.mixer, playlist: globals.playlist };
     globals.mixer = mixer;
     globals.playlist = playlist;
@@ -192,12 +214,8 @@ export async function restore(data: ProjectData, roots: Roots): Promise<RestoreR
     // let anything that was sounding fade out before its nodes go
     if (old.mixer) setTimeout(() => { old.playlist?.dispose(); old.mixer.dispose(); }, 250);
 
-    // ---- plugins load their code in the background; wait so the project is complete when this returns
-    const settled = await Promise.allSettled(plugins.map((p) => p.ready));
-    const missingPlugins = plugins.filter((_, i) => settled[i].status === "rejected").map((p) => p.pluginPath);
-
     const loaded = Promise.all(samples.map((s) => s.loaded)).then(() => ({
-        missingFiles: samples.filter((s) => s.hasFailed()).map((s) => s.path),
+        missingFiles: samples.filter((s) => s.hasFailed()).map((s) => (s.missingAsset ? s.missingAsset.path + " (the project folder is not known)" : s.path)),
     }));
     return { loaded, missingPlugins };
 }

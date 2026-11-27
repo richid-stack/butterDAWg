@@ -21,6 +21,8 @@ export interface CopyRequest {
     from: string;
     /** the name to give it in the project's assets folder; the store may change it if that name is taken by a different file */
     name: string;
+    /** never reuse a file that is already there with the same bytes: this file gets one of its own (its provenance differs) */
+    unique?: boolean;
 }
 
 export interface CopiedAsset {

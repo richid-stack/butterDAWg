@@ -289,3 +289,22 @@ test("store: clearRecoverySync is safe to call on the way out", async () => {
         assert.equal(await s.store.readRecovery(), null);
     } finally { s.done(); }
 });
+
+test("store: copyAssets with unique: true never reuses an identical file", async () => {
+    const s = sandbox();
+    try {
+        const d = s.dir("beat");
+        s.store.grantSave(d);
+        const a = s.file("one/kick.wav", "SAME");
+        const b = s.file("two/kick.wav", "SAME");
+        const [first] = await s.store.copyAssets(d, [{ from: a }], allow);
+        const [second] = await s.store.copyAssets(d, [{ from: b, unique: true }], allow);
+        assert.equal(first.path, "assets/kick.wav");
+        assert.equal(second.path, "assets/kick-2.wav");
+        assert.equal(second.sha256, first.sha256); // the same bytes, kept as two files on purpose
+        assert.deepEqual(fs.readdirSync(path.join(d, "assets")).sort(), ["kick-2.wav", "kick.wav"]);
+        // without it, the identical file is reused
+        const [third] = await s.store.copyAssets(d, [{ from: b }], allow);
+        assert.equal(third.path, "assets/kick.wav");
+    } finally { s.done(); }
+});
