@@ -14,7 +14,7 @@ Basic audio functionality implemented
 - [X] POC custom plugins
 - [X] basic application of custom plugins
 - [X] dynamic application of custom plugins
-- [ ] saving and opening of files
+- [X] saving and opening of files (see [docs/PROJECT.md](docs/PROJECT.md))
 
 # Development
 install all necessary node modules:
@@ -36,15 +36,18 @@ npm test              # unit tests: tempo maths, transport, scheduler, WAV write
 npm run smoke         # drive the real app: plugins, sample drag-and-drop, play and stop, offline, no errors
 npm run test:engine   # the real audio engine: file formats, stereo, render-versus-playback null test, timing
                       # (add -- --long for a real five-minute timing run)
+npm run test:project  # the real app: save, close and reopen; undo and redo of every edit; crash recovery
+                      # (add -- --shots to write docs/progress/phase3-*.png)
 npm run shot -- name  # screenshot to docs/progress/name.png
 ```
-`smoke`, `test:engine` and `shot` need `xvfb` (and ImageMagick for `shot`) on Linux; the two tests
+`smoke`, `test:engine`, `test:project` and `shot` need `xvfb` (and ImageMagick for `shot`) on Linux; the three tests
 also need the `playwright` or `playwright-core` package, and `test:engine` uses `ffmpeg` if it is
 installed (to make MP3, FLAC and OGG test files). Electron 45 downloads its binary the first time it
 runs; `node node_modules/electron/install.js` fetches it up front.
 
 The renderer runs sandboxed with no Node access; it reads files only through the bridge in
-`preload.js` and `main.js`, limited to `files/` and `plugins/`.
+`preload.js` and `main.js`, limited to `files/`, `plugins/` and the `assets/` folder of a project the
+user opened or saved. It can write only into a project folder the user chose.
 
 The plan for turning this into a pro-grade beat-making DAW is in
 [docs/BLUEPRINT.md](docs/BLUEPRINT.md) and [docs/BUILD_ORDER.md](docs/BUILD_ORDER.md).

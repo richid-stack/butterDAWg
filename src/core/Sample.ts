@@ -15,7 +15,8 @@ export interface SampleSource {
 }
 
 export class Sample implements PlayableClip {
-    readonly path: string;
+    /** where the file is read from; it changes when the file is collected into the project folder */
+    path: string;
     private name: string;
     private start = 0; // beats
     private audio: AudioBuffer | null = null;
@@ -90,6 +91,10 @@ export class Sample implements PlayableClip {
 
     getName() {
         return this.name;
+    }
+
+    setName(name: string) {
+        this.name = name;
     }
 
     /** called once the file has loaded (or failed to) */

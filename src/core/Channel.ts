@@ -2,6 +2,7 @@ import { Connectable, globals } from "../globals";
 import { peakOf, rmsOf } from "../engine/dsp";
 import { stereoGain } from "../engine/nodes";
 import { Plugin } from "./Plugin";
+import { PLUGIN_SLOTS } from "../project/schema";
 
 // A mixer channel. The sound path is
 //
@@ -9,7 +10,7 @@ import { Plugin } from "./Plugin";
 //
 // and the output goes to the master channel (or, for the master, to the speakers).
 
-export const PLUGIN_SLOTS = 10;
+export { PLUGIN_SLOTS };
 
 export class Channel implements Connectable {
     readonly ctx: BaseAudioContext;
@@ -111,7 +112,10 @@ export class Channel implements Connectable {
         this.plugins[index] = plugin;
         this.rebuildChain();
         // the plugin's node does not exist until its module has loaded
-        plugin.ready.then(() => this.rebuildChain());
+        plugin.ready.then(
+            () => this.rebuildChain(),
+            (err) => console.error("could not load plugin " + plugin.pluginPath, err),
+        );
     }
 
     removePlugin(index: number) {
@@ -141,6 +145,15 @@ export class Channel implements Connectable {
     getFloatTimeDomainData(): Float32Array {
         this.meter.getFloatTimeDomainData(this.meterBuffer);
         return this.meterBuffer;
+    }
+
+    /** Takes the channel out of the audio graph (a project was closed). */
+    dispose() {
+        this.input.disconnect();
+        this.output.disconnect();
+        for (const plugin of this.plugins) {
+            if (plugin && plugin.isReady()) plugin.getAudioNode().disconnect();
+        }
     }
 
     /** A copy of this channel in another audio context, with copies of its plugins. */

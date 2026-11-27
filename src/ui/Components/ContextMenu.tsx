@@ -9,6 +9,9 @@ export class ContextMenu {
     items: Array<string>;
     raw_items: Array<string>;
     parent_buffer: ContextMenu;
+    /** remove the menu from the page as soon as it closes (menus built for a single right-click) */
+    disposeOnClose = false;
+    private onDocumentClick: (e: MouseEvent) => void;
 
     constructor(items: Array<string>, listeners: Array<Function>) {
         this.element = null;
@@ -38,31 +41,41 @@ export class ContextMenu {
             }
         });
         this.element.id = this.id.toString();*/
-        let a = "";
-        this.raw_items.forEach(item => {
-            if (item !== "[spacer]") {
-                a += '<div class="context_item">' + item + '</div>';
-            } else {
-                a += '<div class="context_spacer"></div>';
-            }
-        });
-        
         let b = document.createElement("div");
         b.classList.add("context_menu");
         b.id = this.id.toString();
-        b.innerHTML = a;
+        // the items are text (a channel's name can come from a project file), never markup
+        this.raw_items.forEach(item => {
+            const row = document.createElement("div");
+            if (item !== "[spacer]") {
+                row.className = "context_item";
+                row.textContent = item;
+            } else {
+                row.className = "context_spacer";
+            }
+            b.appendChild(row);
+        });
         this.element = b;
     }
 
     addToDocument() {
         let temp_this = this;
         document.body.appendChild(this.element);
-        document.addEventListener("click", (e: MouseEvent) => {
+        this.onDocumentClick = (e: MouseEvent) => {
             if (temp_this.element.style.display==="block" && (e.target as HTMLElement).offsetParent !== this.element &&
-                !(e.target as HTMLElement).parentElement.classList.contains("context_menu")) {
+                !(e.target as HTMLElement).parentElement?.classList.contains("context_menu")) {
                 temp_this.toggle();
             }
-        });
+        };
+        document.addEventListener("click", this.onDocumentClick);
+    }
+
+    /** takes the menu out of the page for good */
+    destroy() {
+        document.removeEventListener("click", this.onDocumentClick);
+        this.element.remove();
+        const at = globals.context_menus.indexOf(this);
+        if (at !== -1) globals.context_menus.splice(at, 1);
     }
 
     toggle(e?: MouseEvent) {
@@ -70,6 +83,7 @@ export class ContextMenu {
         // it will provide the location the menu should be displayed
         if (this.element.style.display === "block" || e === undefined) {
             this.element.style.display = "none";
+            if (this.disposeOnClose) this.destroy();
         } else {
             // if this is a submenu, aka the clicked element is a context_item, spawn
             // the context menu offset by the parents position on the screen. Else just
@@ -82,7 +96,7 @@ export class ContextMenu {
                 this.element.style.left = e.clientX + "px";
             }
             this.element.style.display = "block";
-            globals.context_menus.push(this);
+            if (!globals.context_menus.includes(this)) globals.context_menus.push(this);
         }
     }
 
@@ -94,7 +108,8 @@ export class ContextMenu {
             let item = this.element.querySelector(".context_item:nth-child(" + (i+1) + ")");
             item.addEventListener("click", (e) => {
                 if (listeners[j](e)) {
-                    globals.context_menus.forEach(element => {
+                    // (a copy: menus that dispose themselves leave the list while it is walked)
+                    [...globals.context_menus].forEach(element => {
                         element.toggle();
                     });
                 }

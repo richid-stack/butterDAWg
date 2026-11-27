@@ -6,6 +6,10 @@ import { WindowType } from "./ui/misc/window";
 import { ColorPicker } from "./ui/windows/ColorPicker";
 import { PlaylistWindow } from "./ui/windows/PlaylistWindow";
 import { windowTypeOpen } from "./util/Header";
+import * as edit from "./project/edit";
+import { editText } from "./ui/misc/editText";
+
+const DEFAULT_TRACK_COLOUR = "#646e73";
 
 export class TrackComponent {
 
@@ -37,13 +41,16 @@ export class TrackComponent {
 				</div>
 			</div> as any;
 
-		this.element.querySelector("#track_title").innerHTML = this.track.title;
+		// the title is text, never markup (it can come from a project file)
+		this.element.querySelector("#track_title").textContent = this.track.title;
+		this.element.querySelector("#track_title").addEventListener("dblclick", () => {
+			editText(this.element.querySelector("#track_title") as HTMLElement, this.track.title, (title) => edit.renameTrack(this.track, title));
+		});
 
 		let channel_context = new ContextMenu(
 			globals.mixer.getChannels().map(channel => channel.getName()),
 			globals.mixer.getChannels().map(channel => () => {
-				this.track.connect(channel);
-				console.log("track \"" + this.track.title + "\" connected to channel \"" + channel.getName() + "\"");
+				edit.routeTrack(this.track, channel);
 				return true;
 			})
 		);
@@ -77,14 +84,14 @@ export class TrackComponent {
 			"Move down"
 		], [
 			(e: MouseEvent) => {
-				//showTrackConfig(e);
+				// rename: the same as double clicking the title
+				editText(this.element.querySelector("#track_title") as HTMLElement, this.track.title, (title) => edit.renameTrack(this.track, title));
 				return true;
 			},
 			() => {
-				new ColorPicker(this.track.color, (result: Color) => {
-					// TODO border still not right color
-					(this.element.querySelector(".description") as HTMLElement).style.background = result.color;
-					this.track.color = result;
+				// (the picker gets a copy: it must not change the track's colour while it is open)
+				new ColorPicker(new Color(this.track.color.color), (result: Color) => {
+					edit.setTrackColor(this.track, result.color);
 				}).toFront();
 				return true;
 			},
@@ -122,44 +129,31 @@ export class TrackComponent {
 		});
 
 		this.element.querySelector(".description").addEventListener("mouseenter", () => {
-			globals.header_help_text.innerHTML = this.track.title;
+			globals.header_help_text.textContent = this.track.title;
 		});
 
 		(this.element.querySelector(".radio_btn") as HTMLElement).addEventListener("click", (e: MouseEvent) => {
 			e.preventDefault();
-			var light = this.element.querySelector(".radio_btn_green") as HTMLElement;
 			if (e.button === 0) {
-				// the 'or' is bc the property is "" at first, but since the button
-				// gets initialized with a green background, it gets treated as "green"
-				var bg = light.style.backgroundColor;
-				(bg === globals.green || bg === "") ? this.disable() : this.enable();
-				// alert("track " + this.track.getTitle() + " is now " + (this.track.isActive() ? "active" : "inactive"));
+				edit.setTracksActive([[this.track, !this.track.isActive()]]);
 			}
 		});
 
 		(this.element.querySelector(".radio_btn") as HTMLElement).addEventListener("contextmenu", (e: MouseEvent) => {
 			e.preventDefault();
+			// solo: only this track plays; solo again and every track plays
 			const tracks = globals.tracks;
-			let all_tracks_disabled = true;
-			tracks.forEach(track => {
-				if (track.isEnabled() && track !== this) {
-					all_tracks_disabled = false;
-				}
-			});
-			
-			if (all_tracks_disabled && this.isEnabled()) {
-				for (let i = 0; i < tracks.length; i++) {
-					tracks[i].enable();
-				}
+			const others_on = tracks.some(track => track !== this && track.isEnabled());
+			if (!others_on && this.isEnabled()) {
+				edit.setTracksActive(tracks.map(track => [track.getTrack(), true] as [Track, boolean]), "Unsolo");
 			} else {
-				for (let i = 0; i < globals.tracks.length; i++) {
-					(tracks[i] !== this) ? tracks[i].disable() : tracks[i].enable();
-				}
+				edit.setTracksActive(tracks.map(track => [track.getTrack(), track === this] as [Track, boolean]), "Solo track");
 			}
 		});
 
 		this.initializeResizing();
-	}
+		this.refresh();
+		}
 
 	getElement() {
 		return this.element;
@@ -177,31 +171,37 @@ export class TrackComponent {
 		return this.element.clientHeight;
 	}
 
-	disable() {
-		this.track.setActive(false);
-		
-		const radio_btn = this.element.querySelector(".radio_btn");
-		(radio_btn.firstElementChild as HTMLElement).style.backgroundColor = globals.grey;
+	/** shows the track as it is now: its title, colour and whether it plays */
+	refresh() {
+		const title = this.element.querySelector("#track_title") as HTMLElement;
+		if (!title.querySelector("input")) title.textContent = this.track.title;
 
+		const light = this.element.querySelector(".radio_btn_green") as HTMLElement;
 		const description = this.element.querySelector(".description") as HTMLElement;
-		description.style.backgroundColor = this.track.color.darken(20);
-		description.style.color = "#ffffff45";
-		description.style.borderRightColor = this.track.color.darken(20);
-		description.style.borderLeftColor = this.track.color.darken(20);
-		description.style.background = "repeating-linear-gradient(45deg, transparent, transparent 2px, #0000000a 2px, #0000000a 4px) " + this.track.color.darken(20);
+		const plain = this.track.isActive() && this.track.color.color === DEFAULT_TRACK_COLOUR;
+		if (plain) {
+			// untouched: the look comes from the style sheet
+			for (const p of ["background-color", "background", "color", "border-right-color", "border-left-color"]) description.style.removeProperty(p);
+			light.style.backgroundColor = "";
+		} else if (this.track.isActive()) {
+			light.style.backgroundColor = globals.green;
+			description.style.backgroundColor = this.track.color.color;
+			description.style.color = "";
+			description.style.borderRightColor = this.track.color.lighten(10);
+			description.style.background = this.track.color.color;
+		} else {
+			light.style.backgroundColor = globals.grey;
+			description.style.backgroundColor = this.track.color.darken(20);
+			description.style.color = "#ffffff45";
+			description.style.borderRightColor = this.track.color.darken(20);
+			description.style.borderLeftColor = this.track.color.darken(20);
+			description.style.background = "repeating-linear-gradient(45deg, transparent, transparent 2px, #0000000a 2px, #0000000a 4px) " + this.track.color.darken(20);
+		}
 	}
 
-	enable() {
-		this.track.setActive(true);
-		
-		const radio_btn = this.element.querySelector(".radio_btn");
-		(radio_btn.firstElementChild as HTMLElement).style.backgroundColor = globals.green;
-		
-		const description = this.element.querySelector(".description") as HTMLElement;
-		description.style.backgroundColor = this.track.color.color;
-		description.style.color = "";
-		description.style.borderRightColor = this.track.color.lighten(10);
-		description.style.background = this.track.color.color;
+	/** the track this component shows */
+	getTrack() {
+		return this.track;
 	}
 
 	isEnabled() {

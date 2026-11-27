@@ -1,21 +1,12 @@
 //import { Playlist } from "./PlaylistWindow";
-import { Playlist } from "./core/Playlist";
 import { globals } from "./globals";
 import { loadPalette } from "./util/Palette";
-import { Mixer } from "./core/Mixer";
+import { session } from "./project/session";
+import * as edit from "./project/edit";
+import { capture } from "./project/capture";
+import { installMenus } from "./ui/Menus";
 
-// load the core penis
-globals.mixer = new Mixer();
-globals.mixer.newChannel();
-globals.mixer.newChannel();
-globals.mixer.newChannel();
-globals.mixer.newChannel();
-globals.playlist = new Playlist();
-for (let i = 0; i < 15; i++) {
-	globals.playlist.newTrack().title = "Track " + i;
-}
-// the engine plays whatever is on the playlist
-globals.engine.setProvider(globals.playlist);
+// (the mixer, the playlist and the tempo are made by session.start() below: a new project is project data like any other)
 
 loadPalette();
 
@@ -79,16 +70,25 @@ discoverPlugins()
 	})
 	.catch((err) => console.error("could not load the plugins", err));
 
-// tmp
-const tmpPlaylist = new PlaylistWindow();
-tmpPlaylist.setPosition(200, 440);
-tmpPlaylist.update();
+async function boot() {
+	// the starting project, then the windows that show it
+	await session.start();
 
-const tmpMixer = new MixerWindow();
+	// tmp
+	const tmpPlaylist = new PlaylistWindow();
+	tmpPlaylist.setPosition(200, 440);
+	tmpPlaylist.update();
 
-globals.playlist.getTracks()[0].connect(globals.mixer.getChannels()[0]);
+	const tmpMixer = new MixerWindow();
 
-// hooks for the automated tests (only present when the app is started in test mode)
-if (window.bridge.testMode) {
-	(window as any).__bdp = { globals, Sample, Plugin, renderProject, encodeWav };
+	installMenus();
+
+	// hooks for the automated tests (only present when the app is started in test mode)
+	if (window.bridge.testMode) {
+		(window as any).__bdp = { globals, Sample, Plugin, renderProject, encodeWav, session, edit, capture };
+	}
+
+	// if the app did not close properly last time, offer to bring the work back
+	await session.offerRecovery();
 }
+boot().catch((err) => console.error("could not start", err));

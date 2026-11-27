@@ -31,6 +31,12 @@ export class Mixer {
         return channel;
     }
 
+    /** Takes the whole mixer out of the audio graph (a project was closed). */
+    dispose() {
+        this.channels.forEach((c) => c.dispose());
+        this.master.dispose();
+    }
+
     /** A copy of the whole mixer in another audio context (for offline rendering). */
     async cloneTo(ctx: BaseAudioContext): Promise<Mixer> {
         const copy = new Mixer(ctx, 0);

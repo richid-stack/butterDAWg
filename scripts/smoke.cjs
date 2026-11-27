@@ -12,6 +12,8 @@
 //
 // Needs Playwright (the Electron driver only, no browsers): `playwright` or `playwright-core`.
 const path = require("node:path");
+const fs = require("node:fs");
+const os = require("node:os");
 
 let _electron;
 try {
@@ -31,7 +33,10 @@ function check(name, ok, detail = "") {
 
 (async () => {
   // Electron rejects some NODE_OPTIONS that sandboxes set for their network proxy
-  const env = { ...process.env, BDP_NO_RELOAD: "1" };
+  // test mode keeps the recent list and the recovery file in a scratch folder (not the real ones),
+  // and lets the app close without asking about unsaved work
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "bdp-smoke-"));
+  const env = { ...process.env, BDP_NO_RELOAD: "1", BDP_TEST: "1", BDP_USER_DATA: userData };
   delete env.NODE_OPTIONS;
 
   const app = await _electron.launch({

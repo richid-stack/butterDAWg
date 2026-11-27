@@ -1,0 +1,12 @@
+{
+  "format": "butterdawg-licences",
+  "note": "Where the audio in files/ came from and what it may be used for. Every clip a project uses is recorded with this information. Add one entry for each folder or file; the longest matching path wins. Use null when the licence is not known: the project then records it as unknown, and the app will warn before an export that is meant to be shared.",
+  "entries": [
+    {
+      "path": "samples",
+      "library": "Starter samples",
+      "licence": null,
+      "credit": "Came with the butterDAWg repository; the author and licence of these files have not been recorded yet."
+    }
+  ]
+}

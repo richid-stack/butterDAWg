@@ -20,6 +20,7 @@
 // (optional: without it the MP3/FLAC/OGG checks are skipped).
 const path = require("node:path");
 const fs = require("node:fs");
+const os = require("node:os");
 const { execFileSync } = require("node:child_process");
 const { WaveFile } = require("wavefile");
 
@@ -177,7 +178,7 @@ const inPage = {
 async function run() {
   makeFixtures();
 
-  const env = { ...process.env, BDP_TEST: "1" };
+  const env = { ...process.env, BDP_TEST: "1", BDP_USER_DATA: fs.mkdtempSync(path.join(os.tmpdir(), "bdp-engine-")) };
   delete env.NODE_OPTIONS;
   const app = await _electron.launch({
     executablePath: require(path.join(root, "node_modules", "electron")),

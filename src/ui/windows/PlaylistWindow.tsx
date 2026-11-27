@@ -1,3 +1,5 @@
+import * as edit from "../../project/edit";
+import { session } from "../../project/session";
 import { Sample } from "../../core/Sample";
 import { Track } from "../../core/Track";
 import {
@@ -43,6 +45,7 @@ export class PlaylistWindow extends Window {
 	private watchedSamples = new WeakSet<Sample>();
 	private lastMousePos: { x: number; y: number };
 	private selection: Selection;
+	private unsubscribe: Array<() => void> = [];
 
 	constructor() {
 		super(false);
@@ -54,7 +57,44 @@ export class PlaylistWindow extends Window {
 		this.lastMousePos = { x: 0, y: 0 };
 		this.selection = {};
 		this.initialiseContent();
-	}
+
+		// a new project replaces the tracks; an edit, an undo or a redo changes what they show
+		this.unsubscribe.push(session.onLoaded(() => this.rebuild()));
+		this.unsubscribe.push(session.onRefresh(() => this.refresh()));
+		}
+
+		onClose() {
+			this.unsubscribe.forEach((u) => u());
+		}
+
+		/** makes a row for every track of the open project */
+		private buildTracks() {
+			globals.tracks = [];
+			this.get("#tracks").replaceChildren();
+			globals.playlist.getTracks().forEach((t) => {
+				this.get("#tracks").appendChild(new TrackComponent(t).getElement());
+			});
+		}
+
+		/** a project was opened: start again from its tracks */
+		rebuild() {
+			this.selection = {};
+			this.sampleCanvasBuffer.clear();
+			this.buildTracks();
+			this.update();
+		}
+
+		/** something was edited, undone or redone: show what the tracks hold now */
+		refresh() {
+			globals.tracks.forEach((t) => t.refresh());
+			// clips that are gone cannot stay selected
+			if (this.selection.samples) {
+				const all = globals.playlist.getClips() as Iterable<Sample>;
+				const present = new Set(all);
+				this.selection.samples = this.selection.samples.filter((s) => present.has(s));
+			}
+			this.updatePlaylist();
+		}
 
 	initialiseContent(): void {
 		this.get(".content").appendChild(
@@ -235,6 +275,8 @@ export class PlaylistWindow extends Window {
 		// sample darg listeners
 		let target;
 		let current_drag_element: Sample = null;
+		// where the clip being dragged was when the mouse went down, so the drag is one undo step
+		let drag_start: edit.ClipPlace | null = null;
 		let drag_offset = 0;
 		let base = cumulativeOffset(this.get(".tracks_canvas"));
 		this.get(".tracks_canvas").addEventListener("mousemove", (e) => {
@@ -328,6 +370,7 @@ export class PlaylistWindow extends Window {
 			// oh my god...
 			if ((target = this.getCurrentHoverSample()) && e.buttons === 1) {
 				current_drag_element = target as Sample;
+				drag_start = edit.clipPlace(current_drag_element);
 				drag_offset =
 					e.clientX -
 					base.left -
@@ -350,7 +393,9 @@ export class PlaylistWindow extends Window {
 				}
 			}
 		});
-		document.addEventListener("mouseup", () => {
+		this.addEventListener("mouseup", () => {
+			if (drag_start) edit.recordMoveClip(drag_start);
+			drag_start = null;
 			current_drag_element = null;
 		});
 
@@ -389,6 +434,17 @@ export class PlaylistWindow extends Window {
 			}
 		});
 
+		// Delete takes the selected clips off the playlist (undo brings them back)
+		this.addEventListener("keydown", (e: Event) => {
+			const key = e as KeyboardEvent;
+			if ((key.key !== "Delete" && key.key !== "Backspace") || (key.target as HTMLElement)?.tagName === "INPUT") return;
+			if (this.selection.samples && this.selection.samples.length > 0) {
+				key.preventDefault();
+				edit.deleteClips(this.selection.samples);
+				this.selection = {};
+			}
+		});
+
 		// the cursor follows the transport, and dragging it moves the transport
 		const followTransport = () => {
 			if (!document.contains(track_cursor)) {
@@ -410,9 +466,7 @@ export class PlaylistWindow extends Window {
 		);
 
 		// add all tracks
-		globals.playlist.getTracks().forEach((t) => {
-			this.get("#tracks").appendChild(new TrackComponent(t).getElement());
-		});
+		this.buildTracks();
 
 		// the width of the corner svg is important for correct label positioning, but loads a bit slower
 		this.get(".top_bar_corner_svg > .corner_svg").addEventListener(

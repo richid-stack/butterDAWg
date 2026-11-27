@@ -43,6 +43,8 @@ export class Plugin {
     readonly ctx: BaseAudioContext;
     readonly ready: Promise<void>;
     private audioNode: AudioWorkletNode | null = null;
+    // values asked for before the node exists (a project is opened before the plugin's module has loaded)
+    private pendingParams: Record<string, number> = {};
 
     constructor(pluginPath: string, ctx: BaseAudioContext = globals.audiocontext) {
         this.ctx = ctx;
@@ -50,7 +52,34 @@ export class Plugin {
         this.name = getPluginNameFromPath(pluginPath);
         this.ready = loadPluginModule(ctx, pluginPath).then(() => {
             this.audioNode = new AudioWorkletNode(ctx, this.name);
+            this.applyParams(this.pendingParams);
         });
+    }
+
+    /** The value of every parameter, by name. Before the plugin has loaded, the values that were asked for. */
+    getParams(): Record<string, number> {
+        const out: Record<string, number> = { ...this.pendingParams };
+        if (this.audioNode) this.audioNode.parameters.forEach((param, name) => (out[name] = param.value));
+        return out;
+    }
+
+    /** Sets parameters by name. Names the plugin does not have are kept (so a project resaves them) but do nothing. */
+    setParams(params: Record<string, number>): void {
+        Object.assign(this.pendingParams, params);
+        if (this.audioNode) this.applyParams(params);
+    }
+
+    private applyParams(params: Record<string, number>): void {
+        const targets = new Map<string, AudioParam>();
+        this.audioNode.parameters.forEach((param, name) => targets.set(name, param));
+        for (const [name, value] of Object.entries(params)) {
+            const param = targets.get(name);
+            if (!param) continue;
+            // cancel scheduled automation first, or an old setValueAtTime would win over this value
+            param.cancelScheduledValues(0);
+            param.value = value;
+            delete this.pendingParams[name];
+        }
     }
 
     isReady(): boolean {
@@ -70,13 +99,7 @@ export class Plugin {
     async cloneTo(ctx: BaseAudioContext): Promise<Plugin> {
         const copy = new Plugin(this.pluginPath, ctx);
         await Promise.all([this.ready, copy.ready]);
-        // (the typings of AudioParamMap only have forEach, so collect the copy's parameters first)
-        const targets = new Map<string, AudioParam>();
-        copy.audioNode.parameters.forEach((param, name) => targets.set(name, param));
-        this.audioNode.parameters.forEach((param, name) => {
-            const target = targets.get(name);
-            if (target) target.value = param.value;
-        });
+        copy.setParams(this.getParams());
         copy.bypassed = this.bypassed;
         return copy;
     }
