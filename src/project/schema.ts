@@ -12,6 +12,11 @@
 //   - A file with a newer version than this app knows is refused with a message,
 //     never opened half-understood.
 
+import { ProjectError } from "./errors";
+import { arr, bool, fail, num, obj, str } from "./validate";
+import { validateBeat, validatePatternClips } from "../beat/validate";
+import type { BeatData, PatternClipData } from "../beat/data";
+
 export const PROJECT_FORMAT = "butterdawg-project";
 export const CURRENT_VERSION = 1;
 
@@ -37,6 +42,8 @@ export interface ProjectData {
     mixer: { master: ChannelData; channels: ChannelData[] };
     /** how the windows were left (optional: a project opens without it) */
     view?: { xsnap?: number };
+    /** the channel rack and the patterns (optional: a project from before the beat tools has none) */
+    beat?: BeatData;
 }
 
 export interface TempoPointData {
@@ -84,6 +91,8 @@ export interface TrackData {
     /** where the track plays into; null for nowhere (silent) */
     route: { to: "master" } | { to: "channel"; index: number } | null;
     clips: ClipData[];
+    /** patterns placed on this track (optional) */
+    patternClips?: PatternClipData[];
 }
 
 export interface ClipData {
@@ -134,12 +143,7 @@ export function newProjectData(appVersion: string, name = "Untitled"): ProjectDa
 
 // ---- reading a file -----------------------------------------------------------
 
-export class ProjectError extends Error {
-    constructor(message: string) {
-        super(message);
-        this.name = "ProjectError";
-    }
-}
+export { ProjectError };
 
 /** Turns the JSON of version n into the JSON of version n+1. `MIGRATIONS[0]` is 1 to 2. */
 export type Migration = (raw: any) => any;
@@ -203,40 +207,6 @@ export function serializeProject(data: ProjectData): string {
 
 const MAX_VOLUME = 4; // +12 dB
 const MAX_BPM = 999;
-
-function fail(path: string, message: string): never {
-    throw new ProjectError(`${path}: ${message}`);
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-    return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function num(v: unknown, path: string, min = -Infinity, max = Infinity): number {
-    if (typeof v !== "number" || !Number.isFinite(v)) fail(path, "must be a number");
-    if (v < min || v > max) fail(path, `must be between ${min} and ${max}, not ${v}`);
-    return v;
-}
-
-function str(v: unknown, path: string): string {
-    if (typeof v !== "string") fail(path, "must be text");
-    return v;
-}
-
-function bool(v: unknown, path: string): boolean {
-    if (typeof v !== "boolean") fail(path, "must be true or false");
-    return v;
-}
-
-function arr(v: unknown, path: string): unknown[] {
-    if (!Array.isArray(v)) fail(path, "must be a list");
-    return v;
-}
-
-function obj(v: unknown, path: string): Record<string, unknown> {
-    if (!isRecord(v)) fail(path, "must be an object");
-    return v;
-}
 
 /**
  * A relative path must stay inside the folder it is relative to: no "..", no
@@ -311,6 +281,9 @@ export function validateProject(data: unknown): asserts data is ProjectData {
     validateChannel((d.mixer as any).master, "mixer.master");
     channels.forEach((c, i) => validateChannel(c, `mixer.channels[${i}]`));
 
+    // the beat first: the pattern clips on the tracks refer to its patterns
+    const beatIds = d.beat !== undefined ? validateBeat(d.beat, { assetIds, channelCount: channels.length }) : { patterns: new Set<string>() };
+
     arr(d.tracks, "tracks").forEach((t, i) => {
         const p = `tracks[${i}]`;
         const track = obj(t, p);
@@ -334,6 +307,7 @@ export function validateProject(data: unknown): asserts data is ProjectData {
             num(clip.startBeat, `${cp}.startBeat`, 0);
             str(clip.name, `${cp}.name`);
         });
+        if (track.patternClips !== undefined) validatePatternClips(track.patternClips, `${p}.patternClips`, beatIds.patterns);
     });
 
     if (d.view !== undefined) {

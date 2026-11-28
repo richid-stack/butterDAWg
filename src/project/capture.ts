@@ -12,6 +12,9 @@ import { Mixer } from "../core/Mixer";
 import { Playlist } from "../core/Playlist";
 import { Plugin } from "../core/Plugin";
 import { Sample } from "../core/Sample";
+import { Arrangement } from "../beat/Arrangement";
+import { Beat } from "../beat/Beat";
+import { captureBeat, FileRef, restoreBeat } from "../beat/persist";
 import { Color } from "../ui/misc/Color";
 import {
     AssetBook,
@@ -36,6 +39,13 @@ export function setLicenceManifest(m: LicenceManifest | null): void {
 /** what is recorded for a file: what was remembered about it, or what the library record says */
 export function metaFor(absolute: string, roots: Roots): AssetMeta {
     return assetBook.get(absolute) ?? defaultMeta(absolute, roots, manifest);
+}
+
+/** every audio file the project uses: the clips' and the instruments' zones' (these are what is copied when collecting) */
+export function usedFiles(): Array<FileRef & { path: string }> {
+    const files: Array<FileRef & { path: string }> = [...(globals.playlist.getClips() as Iterable<Sample>)];
+    for (const instrument of globals.beat?.instruments ?? []) files.push(...instrument.zones);
+    return files;
 }
 
 export interface CaptureOptions extends Roots {
@@ -64,7 +74,7 @@ export function capture(options: CaptureOptions): ProjectData {
     // every file the clips use becomes one asset, in the order the clips first use it
     const assets: AssetData[] = [];
     const idByPath = new Map<string, string>();
-    const assetFor = (sample: Sample): string => {
+    const assetFor = (sample: FileRef): string => {
         // a clip whose file cannot be found keeps the record it came with
         const missing = sample.missingAsset;
         const key = missing ? "missing:" + missing.location + ":" + missing.path : sample.path;
@@ -102,10 +112,12 @@ export function capture(options: CaptureOptions): ProjectData {
                 startBeat: sample.getStartBeat(),
                 name: sample.getName(),
             })),
+            ...(track.getPatternClips().length > 0 ? { patternClips: track.getPatternClips().map((c) => ({ ...c })) } : {}),
         };
     });
 
-    const loop = transport.getLoop();
+    // (in pattern mode the transport's loop is the pattern's; the song's own loop is kept aside)
+    const loop = globals.beat ? globals.beat.songLoop() : transport.getLoop();
     return {
         format: PROJECT_FORMAT,
         version: CURRENT_VERSION,
@@ -118,7 +130,13 @@ export function capture(options: CaptureOptions): ProjectData {
         tracks,
         mixer: { master: captureChannel(mixer.getMaster()), channels: channels.map(captureChannel) },
         view: { xsnap: globals.xsnap },
+        ...(beatHasContent(globals.beat) ? { beat: captureBeat(globals.beat, assetFor) } : {}),
     };
+}
+
+/** a project with nothing in the rack and no patterns is saved without a beat part, as before */
+function beatHasContent(beat: Beat | undefined): beat is Beat {
+    return !!beat && (beat.instruments.length > 0 || beat.patterns.length > 0);
 }
 
 /** the part of a project that is edited by the user, for comparing two states (not the save time or app version) */
@@ -126,6 +144,9 @@ export function contentOf(data: ProjectData): unknown {
     const { savedAt, appVersion, ...rest } = data;
     return rest;
 }
+
+/** the hook that forgets key switches when the timeline jumps, for the beat of the open project */
+let unhookSwitches: (() => void) | null = null;
 
 export interface RestoreResult {
     /** Resolves when every clip's file has been read. Lists the clips whose file could not be read. */
@@ -176,6 +197,7 @@ export async function restore(data: ProjectData, roots: Roots): Promise<RestoreR
         if (trackData.route) {
             track.connect(trackData.route.to === "master" ? mixer.getMaster() : mixer.getChannels()[trackData.route.index]);
         }
+        for (const placed of trackData.patternClips ?? []) track.addPatternClip({ ...placed });
         for (const clip of trackData.clips) {
             const asset = assets.get(clip.asset);
             if (!asset) continue; // validateProject makes sure the asset exists
@@ -196,6 +218,15 @@ export async function restore(data: ProjectData, roots: Roots): Promise<RestoreR
         }
     }
 
+    // ---- the instruments and patterns, with their files
+    const remember = (asset: AssetData, absolute: string) => {
+        const meta: Parameters<AssetBook["remember"]>[1] = { source: asset.source, licence: asset.licence };
+        if (asset.credit) meta.credit = asset.credit;
+        if (asset.sha256) meta.sha256 = asset.sha256;
+        assetBook.remember(absolute, meta);
+    };
+    const { beat, zones } = restoreBeat(data.beat, ctx, engine.transport, mixer, assets, (asset) => toAbsolute(asset, roots), remember);
+
     // ---- plugins load their code in the background; wait, so that the swap below happens in one go with nothing
     // half-loaded, and the windows are never asked to draw a project they do not have the parts of
     const settled = await Promise.allSettled(plugins.map((p) => p.ready));
@@ -204,18 +235,26 @@ export async function restore(data: ProjectData, roots: Roots): Promise<RestoreR
     // ---- swap them in (nothing may be playing while the project underneath is swapped)
     engine.stop();
     engine.seek(0);
-    const old = { mixer: globals.mixer, playlist: globals.playlist };
+    const old = { mixer: globals.mixer, playlist: globals.playlist, beat: globals.beat };
     globals.mixer = mixer;
     globals.playlist = playlist;
-    engine.setProvider(playlist);
+    globals.beat = beat;
+    engine.setProvider(new Arrangement(playlist, beat, () => engine.transport.tempo));
+    unhookSwitches?.();
+    // a key switch is forgotten when the timeline jumps, so that playing from any place sounds the same
+    unhookSwitches = engine.notes.onFlush(() => beat.instruments.forEach((i) => (i.switchNote = null)));
     engine.transport.setTempoPoints(data.tempo.points);
     engine.transport.setLoop(data.loop);
+    // (these two borrow the transport's loop in pattern mode, so they come after it is set)
+    beat.setActivePattern(data.beat?.activePattern ?? null);
+    beat.setScope(data.beat?.scope ?? "song");
     globals.xsnap = data.view?.xsnap ?? 20;
     // let anything that was sounding fade out before its nodes go
-    if (old.mixer) setTimeout(() => { old.playlist?.dispose(); old.mixer.dispose(); }, 250);
+    if (old.mixer) setTimeout(() => { old.playlist?.dispose(); old.beat?.dispose(); old.mixer.dispose(); }, 250);
 
-    const loaded = Promise.all(samples.map((s) => s.loaded)).then(() => ({
-        missingFiles: samples.filter((s) => s.hasFailed()).map((s) => (s.missingAsset ? s.missingAsset.path + " (the project folder is not known)" : s.path)),
+    const missing = (file: { path: string; missingAsset?: AssetData | null }) => (file.missingAsset ? file.missingAsset.path + " (the project folder is not known)" : file.path);
+    const loaded = Promise.all([...samples.map((s) => s.loaded), ...zones.map((z) => z.loaded)]).then(() => ({
+        missingFiles: [...samples.filter((s) => s.hasFailed()), ...zones.filter((z) => z.hasFailed())].map(missing),
     }));
     return { loaded, missingPlugins };
 }

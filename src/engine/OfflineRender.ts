@@ -1,7 +1,8 @@
 import { Scheduler } from "./Scheduler";
 import { TempoMap } from "./TempoMap";
 import { Transport } from "./Transport";
-import { PlayableClip, Voices } from "./Voices";
+import { AnyClip, CompositeHost, NoteHost } from "./NoteHost";
+import { Voices } from "./Voices";
 
 // Renders a timeline faster than real time with an OfflineAudioContext. It
 // uses the same transport, scheduler and voices as live playback, so what you
@@ -11,7 +12,8 @@ export interface TimelineRender {
     /** the offline context; the graph the clips play into must already be built in it */
     ctx: OfflineAudioContext;
     tempo: TempoMap;
-    clips: PlayableClip[];
+    /** audio clips and notes */
+    clips: AnyClip[];
     /** beat to start from (default 0) */
     startBeat?: number;
     /**
@@ -36,11 +38,11 @@ export async function renderTimeline(job: TimelineRender): Promise<AudioBuffer> 
 
     const lengthSeconds = ctx.length / ctx.sampleRate;
     const incremental = job.mode === "incremental";
-    const scheduler = new Scheduler<PlayableClip>(
+    const scheduler = new Scheduler<AnyClip>(
         transport,
         clock,
         { getClips: () => clips },
-        new Voices(ctx),
+        new CompositeHost(new Voices(ctx), new NoteHost(ctx)),
         { lookahead: incremental ? (job.lookahead ?? 0.15) : lengthSeconds + 1 },
     );
 

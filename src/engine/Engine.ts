@@ -2,7 +2,8 @@ import { ReadBytes, SampleCache } from "./AudioLoader";
 import { ClipProvider, Scheduler } from "./Scheduler";
 import { TempoMap } from "./TempoMap";
 import { Transport } from "./Transport";
-import { PlayableClip, Voices } from "./Voices";
+import { AnyClip, CompositeHost, NoteHost } from "./NoteHost";
+import { Voices } from "./Voices";
 
 // The live audio engine: one audio context, the transport that says where we
 // are in the song, the scheduler that starts clips on time, and the cache of
@@ -21,12 +22,14 @@ export class Engine {
     readonly transport: Transport;
     readonly samples: SampleCache;
     readonly voices: Voices;
-    readonly scheduler: Scheduler<PlayableClip>;
+    /** plays notes (the instruments of the channel rack) */
+    readonly notes: NoteHost;
+    readonly scheduler: Scheduler<AnyClip>;
 
     /** seconds between pressing play and the first sound, so a clip on beat 0 starts on time */
     startDelay = 0.06;
 
-    private provider: ClipProvider<PlayableClip> = { getClips: () => [] };
+    private provider: ClipProvider<AnyClip> = { getClips: () => [] };
 
     constructor(options: EngineOptions) {
         // let the audio device choose its own sample rate; files are converted to it
@@ -35,12 +38,13 @@ export class Engine {
         this.transport = new Transport(clock, new TempoMap(options.bpm ?? 120));
         this.samples = new SampleCache(this.ctx, options.readBytes);
         this.voices = new Voices(this.ctx);
-        this.scheduler = new Scheduler<PlayableClip>(this.transport, clock, { getClips: () => this.provider.getClips() }, this.voices);
+        this.notes = new NoteHost(this.ctx);
+        this.scheduler = new Scheduler<AnyClip>(this.transport, clock, { getClips: () => this.provider.getClips() }, new CompositeHost(this.voices, this.notes));
         this.scheduler.start();
     }
 
-    /** where the clips come from (the playlist) */
-    setProvider(provider: ClipProvider<PlayableClip>): void {
+    /** where the clips and notes come from (the arrangement: the playlist's audio and the patterns' notes) */
+    setProvider(provider: ClipProvider<AnyClip>): void {
         this.provider = provider;
     }
 

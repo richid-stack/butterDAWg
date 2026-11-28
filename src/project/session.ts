@@ -8,7 +8,7 @@ import { globals } from "../globals";
 import { files } from "../platform/files";
 import { projects, ProjectStore, Recovery } from "../platform/projects";
 import { showDialog } from "../ui/Dialog";
-import { assetBook, capture, metaFor, restore, setLicenceManifest } from "./capture";
+import { assetBook, capture, metaFor, restore, setLicenceManifest, usedFiles } from "./capture";
 import { AssetMeta, baseName, parseLicenceManifest, Roots } from "./assets";
 import { History } from "./History";
 import { ProjectData, ProjectError, parseProject, serializeProject } from "./schema";
@@ -169,7 +169,7 @@ export class Session {
         const repointed: Array<[{ path: string }, string]> = [];
         try {
             const roots = this.roots; // where the files are now, before anything moves
-            const clips = [...(globals.playlist.getClips() as Iterable<{ path: string; missingAsset?: unknown }>)];
+            const clips = usedFiles(); // the clips' files and the instruments' samples
             // audio files that have to be in the project folder: the project's own when it moves, and everything when collecting
             const wanted = new Map<string, string>(); // absolute path -> name in assets/
             for (const clip of clips) {

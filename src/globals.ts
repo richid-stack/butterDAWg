@@ -6,11 +6,14 @@ import { Track } from "./core/Track";
 import { TrackComponent } from "./Track";
 import { Channel } from "./core/Channel";
 import { Engine } from "./engine/Engine";
+import { Beat } from "./beat/Beat";
 import { files } from "./platform/files";
 
 class Globals {
 	mixer: Mixer;
 	playlist: Playlist;
+	// the instruments of the channel rack and the patterns made for them
+	beat: Beat;
 
 	tracks: Array<TrackComponent> = [];
 	channels: Array<Channel> = [];

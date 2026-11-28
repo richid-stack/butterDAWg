@@ -3,6 +3,8 @@ import { globals } from "./globals";
 import { loadPalette } from "./util/Palette";
 import { session } from "./project/session";
 import * as edit from "./project/edit";
+import * as beatEdit from "./beat/edit";
+import { Instrument, Zone } from "./instruments/Instrument";
 import { capture } from "./project/capture";
 import { installMenus } from "./ui/Menus";
 
@@ -85,7 +87,7 @@ async function boot() {
 
 	// hooks for the automated tests (only present when the app is started in test mode)
 	if (window.bridge.testMode) {
-		(window as any).__bdp = { globals, Sample, Plugin, renderProject, encodeWav, session, edit, capture };
+		(window as any).__bdp = { globals, Sample, Plugin, renderProject, encodeWav, session, edit, capture, beatEdit, Instrument, Zone };
 	}
 
 	// if the app did not close properly last time, offer to bring the work back
