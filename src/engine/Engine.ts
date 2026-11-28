@@ -50,7 +50,12 @@ export class Engine {
 
     async play(): Promise<void> {
         if (this.ctx.state !== "running") await this.ctx.resume();
-        this.transport.play(this.startDelay);
+        // Start on a boundary of the audio engine's 128-frame blocks. Pitch automation (a slide, a glide) is sampled
+        // once per block, so a sound that starts on the same grid as the export comes out sample for sample the same.
+        const rate = this.ctx.sampleRate;
+        const block = 128;
+        const frame = Math.ceil(((this.ctx.currentTime + this.startDelay) * rate) / block - 1e-9) * block;
+        this.transport.playAt(frame / rate);
     }
 
     pause(): void {

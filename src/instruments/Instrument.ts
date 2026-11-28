@@ -2,6 +2,7 @@ import { globals } from "../globals";
 import { stereoGain } from "../engine/nodes";
 import { NotePlay, NoteTarget, NoteVoice } from "../engine/NoteHost";
 import { SamplerData, SamplerMode, ZoneSettings, emptySampler } from "../beat/data";
+import { Envelope, MIN_RELEASE } from "./envelope";
 import { isKeySwitch, pickZones, playbackRate, velocityGain } from "./zones";
 import type { AssetData } from "../project/schema";
 
@@ -208,20 +209,13 @@ export class Instrument implements NoteTarget {
     }
 }
 
-const hasHold = (p: AudioParam): boolean => typeof (p as any).cancelAndHoldAtTime === "function";
-
-/** Holds an automated parameter at whatever value it has at time `at`, dropping automation after it. */
-function holdAt(param: AudioParam, at: number) {
-    if (hasHold(param)) (param as any).cancelAndHoldAtTime(at);
-    else param.cancelScheduledValues(at);
-}
-
 /** the sound of one note of a sampler */
 class SamplerVoice implements NoteVoice {
     readonly when: number;
     private source: AudioBufferSourceNode;
     private env: GainNode;
     private pan: StereoPannerNode;
+    private envelope: Envelope;
     private ended = false;
     private callbacks: Array<() => void> = [];
 
@@ -259,15 +253,8 @@ class SamplerVoice implements NoteVoice {
 
         // ---- the envelope: attack, decay to the sustain level, and for held notes a release
         const peak = z.volume * velocityGain(note.velocity, z.veltrack ?? 1);
-        const attack = Math.max(e.attack, 0.001); // never an instant jump: that is a click
+        this.envelope = new Envelope(when, peak, e);
         this.env = stereoGain(ctx);
-        const g = this.env.gain;
-        g.setValueAtTime(0, when);
-        g.linearRampToValueAtTime(peak, when + attack);
-        if (e.sustain < 1) {
-            if (e.decay > 0) g.linearRampToValueAtTime(peak * e.sustain, when + attack + e.decay);
-            else g.setValueAtTime(peak * e.sustain, when + attack);
-        }
 
         // ---- the panning of this note: the zone's and the note's
         this.pan = new StereoPannerNode(ctx, { pan: Math.max(-1, Math.min(1, z.pan + note.pan)) });
@@ -280,27 +267,37 @@ class SamplerVoice implements NoteVoice {
             // held for the length of the note, then released
             let off = when + Math.max(note.duration, 0);
             if (note.stopAt !== null) off = Math.min(off, note.stopAt);
-            off = Math.max(off, when + attack);
-            const release = Math.max(e.release, 0.005);
-            holdAt(g, off);
-            g.linearRampToValueAtTime(0, off + release);
-            this.source.stop(off + release + 0.02);
+            this.envelope.release(off, Math.max(e.release, MIN_RELEASE));
         } else if (note.stopAt !== null) {
-            this.cut(note.stopAt, 0.005);
+            this.envelope.cut(note.stopAt, 0.005);
         }
+        this.schedule();
         this.source.onended = () => this.finish();
+    }
+
+    /** puts the envelope's straight lines on the gain, and stops the source when they have reached silence */
+    private schedule(): void {
+        const g = this.env.gain;
+        const points = this.envelope.points();
+        g.cancelScheduledValues(0);
+        g.setValueAtTime(points[0][1], points[0][0]);
+        for (let i = 1; i < points.length; i++) g.linearRampToValueAtTime(points[i][1], points[i][0]);
+        const end = this.envelope.endsAt;
+        if (end !== null) {
+            try {
+                this.source.stop(end + 0.02);
+            } catch {
+                // already stopped
+            }
+        }
     }
 
     cut(at: number, fade: number): void {
         if (this.ended) return;
-        const g = this.env.gain;
-        holdAt(g, at);
-        g.linearRampToValueAtTime(0, at + fade);
-        try {
-            this.source.stop(at + fade);
-        } catch {
-            // already stopped
-        }
+        // the level is worked out from the envelope, not asked of the audio engine: this works for a sound that has
+        // not started, and gives the same line live and in the export
+        this.envelope.cut(at, fade);
+        this.schedule();
     }
 
     cancel(): void {

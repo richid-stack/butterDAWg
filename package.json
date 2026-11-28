@@ -14,7 +14,8 @@
     "make": "npm run build && electron-forge make",
     "smoke": "xvfb-run -a node scripts/smoke.cjs",
     "test:engine": "xvfb-run -a node scripts/engine-test.cjs",
-    "test:project": "xvfb-run -a node scripts/project-test.cjs"
+    "test:project": "xvfb-run -a node scripts/project-test.cjs",
+    "test:beat": "xvfb-run -a node scripts/beat-test.cjs"
   },
   "repository": {
     "type": "git",
